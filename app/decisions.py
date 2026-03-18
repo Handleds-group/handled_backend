@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +13,8 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 @router.get("/health")
-async def history_health():
-    """Health check for history service"""
-    return {"status": "healthy", "service": "history"}
+async def decision_health():
+    """Health check for decision engine"""
+    return {"status": "healthy", "service": "decision-engine"}
 
-# Add history endpoints later
+# Add decision endpoints later

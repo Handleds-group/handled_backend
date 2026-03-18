@@ -162,4 +162,20 @@ async def get_login_history(
     request: Request,
     skip: int = 0,
     limit: int = 20,
-   
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get user's login history with pagination"""
+    
+    user = await get_current_user(token, db)
+    
+    result = await db.execute(
+        select(models.LoginHistory)
+        .where(models.LoginHistory.user_id == user.id)
+        .order_by(models.LoginHistory.login_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    history = result.scalars().all()
+    
+    return history
