@@ -5,9 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime
 
-from app.database import get_db, get_redis
-from app import schemas
-from app.utils import get_current_user, rate_limit
+from database import get_db, get_redis
+import schemas
+from utils import get_current_user, rate_limit
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

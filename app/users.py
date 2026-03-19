@@ -7,9 +7,9 @@ import os
 import shutil
 from datetime import datetime
 
-from app.database import get_db, get_redis
-from app import schemas, models
-from app.utils import get_current_user, rate_limit, check_idempotency, upload_to_cdn
+from database import get_db, get_redis
+import schemas, models
+from utils import get_current_user, rate_limit, check_idempotency, upload_to_cdn
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

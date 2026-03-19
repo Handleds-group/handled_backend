@@ -11,8 +11,8 @@ from fastapi import HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import models
-from app.database import get_redis
+import models
+from database import get_redis
 
 # Optional dependency: PyJWT
 try:

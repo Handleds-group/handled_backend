@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Enum, Float
 from sqlalchemy.sql import func
 import enum
-from app.database import Base
+from database import Base
 
 class UserRole(str, enum.Enum):
     USER = "user"

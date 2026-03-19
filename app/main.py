@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 import logging
 import time
 from typing import Dict
+import sys
 
-from app.database import engine, check_db_health, check_redis_health
-from app import auth, users, decisions, history
-from app.utils import kill_switch
+
+from database import engine, check_db_health, check_redis_health
+import auth, users, decisions, history
+from utils import kill_switch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,11 +27,11 @@ async def lifespan(app: FastAPI):
     # Pre-flight checks
     if not await check_db_health():
         logger.error("❌ Database connection failed")
-        raise Exception("Database connection failed")
+        sys.exit("❌ Database connection failed")
     
     if not await check_redis_health():
         logger.error("❌ Redis connection failed")
-        raise Exception("Redis connection failed")
+        sys.exit("❌ Redis connection failed")
     
     logger.info("✅ All systems ready")
     yield

@@ -1,36 +1,58 @@
+# app/database.py
+import os
+from typing import Optional
+from dotenv import load_dotenv
+import logging
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 import redis.asyncio as redis
-from typing import Optional
-import os
-from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
-# PostgreSQL connection with connection pooling
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/handled")
+# ----------------------------
+# PostgreSQL Configuration
+# ----------------------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("❌ DATABASE_URL is not set")
+
+# 🔥 AUTO-FIX sslmode → ssl for asyncpg
+if "sslmode=" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("sslmode=", "ssl=")
+
+# 🔥 ENSURE asyncpg is used
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+asyncpg://"
+    )
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True if os.getenv("DEBUG") == "True" else False,
-    pool_size=20,  # Connection pool size
-    max_overflow=10,  # Extra connections beyond pool_size
-    pool_timeout=30,  # Timeout for getting connection from pool
-    pool_recycle=1800,  # Recycle connections after 30 minutes
-    pool_pre_ping=True,  # Verify connections before using
+    echo=os.getenv("DEBUG") == "True",
+    pool_size=5,
+    max_overflow=5,
+    pool_timeout=30,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+    connect_args={"ssl": "require"},
 )
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
 )
 
 Base = declarative_base()
 
-# Redis connection for caching, rate limiting, idempotency
+# ----------------------------
+# Redis Configuration
+# ----------------------------
 redis_client: Optional[redis.Redis] = None
 
 def _normalize_redis_url(url: str) -> str:
@@ -38,48 +60,53 @@ def _normalize_redis_url(url: str) -> str:
         return f"redis://{url}"
     return url
 
-async def init_redis():
+async def init_redis() -> redis.Redis:
     global redis_client
-    redis_client = await redis.from_url(
-        _normalize_redis_url(os.getenv("REDIS_URL", "redis://localhost:6379")),
-        encoding="utf-8",
-        decode_responses=True,
-        max_connections=20,  # Connection pool
-        socket_timeout=5,  # Socket timeout
-        socket_connect_timeout=5,
-        retry_on_timeout=True,
-        health_check_interval=30,  # Check connection health
-    )
+
+    if redis_client is None:
+        redis_client = await redis.from_url(
+            _normalize_redis_url(os.getenv("REDIS_URL")),
+            encoding="utf-8",
+            decode_responses=True,
+            max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", 20)),
+            socket_timeout=float(os.getenv("REDIS_SOCKET_TIMEOUT", 5)),
+            socket_connect_timeout=float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5)),
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
+        logger.info("✅ Redis initialized")
+
     return redis_client
 
 async def get_redis():
-    if redis_client is None:
-        await init_redis()
-    return redis_client
+    return await init_redis()
 
+# ----------------------------
+# DB Dependency
+# ----------------------------
 async def get_db():
-    """Dependency for getting database session"""
     async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+        yield session
 
-# Health checks
+# ----------------------------
+# Health checks (FIXED)
+# ----------------------------
 async def check_db_health() -> bool:
     try:
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
+        logger.info("✅ Database healthy")
         return True
     except Exception as e:
-        print(f"Database health check failed: {e}")
+        logger.error(f"❌ Database error: {e}")
         return False
 
 async def check_redis_health() -> bool:
     try:
-        redis = await get_redis()
-        await redis.ping()
+        r = await get_redis()
+        await r.ping()
+        logger.info("✅ Redis healthy")
         return True
     except Exception as e:
-        print(f"Redis health check failed: {e}")
+        logger.error(f"❌ Redis error: {e}")
         return False
