@@ -491,3 +491,269 @@ async def resend_otp(
     )
     
     return {"message": "OTP resent successfully"}
+
+
+@router.post("/forgot-password", response_model=dict)
+@rate_limit(max_requests=3, window_seconds=3600)  # 3 per hour
+@check_idempotency(timeout=3600)
+async def forgot_password(
+    request: Request,
+    data: schemas.ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    redis = Depends(get_redis)
+):
+    """
+    Step 1: Request password reset
+    Sends OTP to user's email
+    """
+    
+    # Check if user exists (don't reveal if email exists or not for security)
+    result = await db.execute(
+        select(models.User).where(models.User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+    
+    # Always return success to prevent email enumeration
+    if not user:
+        # Still "success" but don't send email
+        logger.info(f"Password reset requested for non-existent email: {data.email}")
+        return {
+            "message": "If your email is registered, you'll receive a reset code",
+            "next_step": "/api/auth/reset-password/verify"
+        }
+    
+    # Check if user is verified
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please verify your email first. Request a new OTP on signup."
+        )
+    
+    # Generate OTP
+    otp = ''.join(random.choices(string.digits, k=6))
+    otp_expiry = datetime.utcnow() + timedelta(minutes=10)
+    
+    # Store in Redis for quick access (with user ID to track)
+    await redis.setex(
+        f"password_reset:{data.email}",
+        600,  # 10 minutes
+        json.dumps({
+            "otp": otp,
+            "user_id": user.id,
+            "attempts": 0
+        })
+    )
+    
+    # Also store in DB as backup
+    db_otp = models.OTP(
+        email=data.email,
+        otp=otp,
+        purpose="password_reset",
+        expires_at=otp_expiry
+    )
+    db.add(db_otp)
+    await db.commit()
+    
+    # Send email in background
+    background_tasks.add_task(
+        send_email,
+        to=data.email,
+        subject="Reset your Handled password",
+        template="password_reset",
+        context={
+            "otp": otp,
+            "expiry_minutes": 10,
+            "username": user.username
+        }
+    )
+    
+    # Invalidate all existing sessions for security
+    await invalidate_user_sessions(user.id, redis)
+    
+    logger.info(f"Password reset OTP sent to {data.email}")
+    
+    return {
+        "message": "If your email is registered, you'll receive a reset code",
+        "next_step": "/api/auth/reset-password/verify"
+    }
+
+@router.post("/reset-password/verify", response_model=schemas.PasswordResetResponse)
+@rate_limit(max_requests=5, window_seconds=3600)
+@check_idempotency(timeout=300)
+async def reset_password_verify(
+    request: Request,
+    data: schemas.ResetPasswordVerify,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    redis = Depends(get_redis)
+):
+    """
+    Step 2: Verify OTP and set new password
+    """
+    
+    # Check Redis first (faster)
+    redis_key = f"password_reset:{data.email}"
+    reset_data_json = await redis.get(redis_key)
+    
+    otp_valid = False
+    user_id = None
+    
+    if reset_data_json:
+        reset_data = json.loads(reset_data_json)
+        if reset_data["otp"] == data.otp and reset_data["attempts"] < 3:
+            otp_valid = True
+            user_id = reset_data["user_id"]
+            # Increment attempts to prevent brute force
+            reset_data["attempts"] += 1
+            await redis.setex(redis_key, 600, json.dumps(reset_data))
+    
+    # If not in Redis, check database
+    if not otp_valid:
+        result = await db.execute(
+            select(models.OTP).where(
+                models.OTP.email == data.email,
+                models.OTP.otp == data.otp,
+                models.OTP.purpose == "password_reset",
+                models.OTP.is_used == False,
+                models.OTP.expires_at > datetime.utcnow()
+            ).order_by(models.OTP.created_at.desc())
+        )
+        db_otp = result.scalar_one_or_none()
+        
+        if not db_otp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired OTP"
+            )
+        
+        otp_valid = True
+        # Get user from email
+        user_result = await db.execute(
+            select(models.User).where(models.User.email == data.email)
+        )
+        user = user_result.scalar_one_or_none()
+        if user:
+            user_id = user.id
+        
+        # Mark OTP as used immediately to prevent replay
+        db_otp.is_used = True
+        await db.commit()
+    
+    if not otp_valid or not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP"
+        )
+    
+    # Get user
+    result = await db.execute(
+        select(models.User).where(models.User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Hash new password
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(data.new_password.encode('utf-8'), salt)
+    
+    # Update user
+    user.hashed_password = hashed_password.decode('utf-8')
+    user.refresh_token = None  # Invalidate all refresh tokens
+    user.failed_login_attempts = 0  # Reset failed attempts
+    user.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    
+    # Clean up Redis
+    await redis.delete(redis_key)
+    
+    # Mark all OTPs for this email as used
+    await db.execute(
+        update(models.OTP)
+        .where(
+            models.OTP.email == data.email,
+            models.OTP.purpose == "password_reset",
+            models.OTP.is_used == False
+        )
+        .values(is_used=True)
+    )
+    await db.commit()
+    
+    # Send confirmation email
+    background_tasks.add_task(
+        send_email,
+        to=user.email,
+        subject="Your Handled password was changed",
+        template="password_changed",
+        context={
+            "username": user.username,
+            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            "ip": request.client.host
+        }
+    )
+    
+    logger.info(f"Password reset successful for user: {user.email}")
+    
+    return {"message": "Password successfully reset. You can now login with your new password."}
+
+@router.post("/change-password", response_model=schemas.PasswordResetResponse)
+@rate_limit(max_requests=5, window_seconds=3600)
+async def change_password(
+    request: Request,
+    data: schemas.PasswordChangeRequest,
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+    redis = Depends(get_redis)
+):
+    """
+    Change password for authenticated user (when already logged in)
+    """
+    
+    user = await get_current_user(token, db)
+    
+    # Verify current password
+    if not bcrypt.checkpw(
+        data.current_password.encode('utf-8'),
+        user.hashed_password.encode('utf-8')
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect"
+        )
+    
+    # Hash new password
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(data.new_password.encode('utf-8'), salt)
+    
+    # Update user
+    user.hashed_password = hashed_password.decode('utf-8')
+    user.refresh_token = None  # Invalidate all refresh tokens
+    user.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    
+    # Invalidate all sessions
+    await invalidate_user_sessions(user.id, redis)
+    
+    # Send confirmation email
+    background_tasks.add_task(
+        send_email,
+        to=user.email,
+        subject="Your Handled password was changed",
+        template="password_changed",
+        context={
+            "username": user.username,
+            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            "ip": request.client.host
+        }
+    )
+    
+    logger.info(f"Password changed for user: {user.email}")
+    
+    return {"message": "Password successfully changed. Please login again with your new password."}    

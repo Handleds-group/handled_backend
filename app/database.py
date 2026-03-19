@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
 import redis.asyncio as redis
+import ssl
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -20,9 +21,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("❌ DATABASE_URL is not set")
 
-# 🔥 AUTO-FIX sslmode → ssl for asyncpg
-if "sslmode=" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("sslmode=", "ssl=")
 
 # 🔥 ENSURE asyncpg is used
 if DATABASE_URL.startswith("postgresql://"):
@@ -31,15 +29,20 @@ if DATABASE_URL.startswith("postgresql://"):
         "postgresql+asyncpg://"
     )
 
+
+ssl_context = ssl.create_default_context()
+
+from sqlalchemy.pool import NullPool
+
 engine = create_async_engine(
     DATABASE_URL,
-    echo=os.getenv("DEBUG") == "True",
-    pool_size=5,
-    max_overflow=5,
-    pool_timeout=30,
-    pool_recycle=1800,
+    echo=True,
     pool_pre_ping=True,
-    connect_args={"ssl": "require"},
+    poolclass=NullPool,
+    connect_args={
+        "ssl": ssl_context,
+        "timeout": 10
+    }
 )
 
 AsyncSessionLocal = async_sessionmaker(

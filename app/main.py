@@ -21,24 +21,24 @@ is_running = True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     logger.info("🚀 Starting Handled API...")
-    
-    # Pre-flight checks
-    if not await check_db_health():
-        logger.error("❌ Database connection failed")
-        sys.exit("❌ Database connection failed")
-    
-    if not await check_redis_health():
-        logger.error("❌ Redis connection failed")
-        sys.exit("❌ Redis connection failed")
-    
-    logger.info("✅ All systems ready")
+
+    db_ok = await check_db_health()
+    redis_ok = await check_redis_health()
+
+    if not db_ok:
+        logger.warning("⚠️ Database not available - running in degraded mode")
+
+    if not redis_ok:
+        logger.warning("⚠️ Redis not available")
+
+    logger.info("✅ Server started (with or without DB)")
+
     yield
-    
-    # Shutdown
+
     logger.info("🛑 Shutting down Handled API...")
     await engine.dispose()
+
 
 # Initialize FastAPI
 app = FastAPI(
@@ -88,6 +88,8 @@ async def health_live():
     """Basic liveness check"""
     return {"status": "alive", "timestamp": time.time()}
 
+from fastapi.responses import JSONResponse
+
 @app.get("/health/ready")
 async def health_ready():
     """Readiness check - verifies all dependencies"""
@@ -95,7 +97,7 @@ async def health_ready():
     redis_health = await check_redis_health()
     
     if not db_health or not redis_health:
-        return Response(
+        return JSONResponse(
             status_code=503,
             content={"status": "not ready", "db": db_health, "redis": redis_health}
         )
