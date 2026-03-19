@@ -16,4 +16,4 @@ jinja2
 redis
 celery
 pytest
-
+asyncpg
