@@ -33,10 +33,15 @@ Base = declarative_base()
 # Redis connection for caching, rate limiting, idempotency
 redis_client: Optional[redis.Redis] = None
 
+def _normalize_redis_url(url: str) -> str:
+    if "://" not in url:
+        return f"redis://{url}"
+    return url
+
 async def init_redis():
     global redis_client
     redis_client = await redis.from_url(
-        os.getenv("REDIS_URL", "redis://localhost:6379"),
+        _normalize_redis_url(os.getenv("REDIS_URL", "redis://localhost:6379")),
         encoding="utf-8",
         decode_responses=True,
         max_connections=20,  # Connection pool
