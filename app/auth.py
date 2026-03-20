@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserLogin, OTPVerify, TokenSchema, OTPRequest
 from app.tokens import create_access_token, create_refresh_token
-from app.email_utils import send_email
+from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html
 from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
 import random, string, datetime
@@ -18,42 +18,6 @@ router = APIRouter()
 
 def generate_otp(length=6):
     return ''.join(random.choices(string.digits, k=length))
-
-def build_otp_email_html(
-    title: str,
-    otp_code: str,
-    subtitle: str = "Use the code below to continue",
-    purpose: str | None = None,
-) -> str:
-    # Clean, detailed, darker-purple email template
-    return f"""
-    <div style="font-family: Arial, sans-serif; background:#f2ecff; padding:24px;">
-      <div style="max-width:560px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #decff8; overflow:hidden;">
-        <div style="background:#e9ddff; padding:18px 22px;">
-          <h2 style="margin:0; color:#5b2aa8; font-weight:700;">{title}</h2>
-        </div>
-        <div style="padding:22px;">
-          <p style="margin:0 0 12px 0; color:#4a3b73; font-size:14px;">{subtitle}</p>
-          {f'<div style="margin:0 0 12px 0; color:#5b2aa8; font-size:12px; font-weight:700;">{purpose}</div>' if purpose else ''}
-          <div style="text-align:center; margin:18px 0;">
-            <span style="display:inline-block; background:#efe3ff; color:#5b2aa8; padding:12px 20px; border-radius:10px; font-size:24px; letter-spacing:3px; font-weight:700;">
-              {otp_code}
-            </span>
-          </div>
-          <div style="background:#f7f3ff; border:1px dashed #d8c6f7; padding:12px; border-radius:10px; color:#5a4a7a; font-size:12px;">
-            <div style="font-weight:700; color:#5b2aa8; margin-bottom:6px;">OTP Details</div>
-            <div>Length: 6 digits</div>
-            <div>Expires in: 10 minutes</div>
-            <div>One-time use only</div>
-          </div>
-          <p style="margin:12px 0 0 0; color:#6b5a8a; font-size:12px;">If you did not request this, you can safely ignore this email.</p>
-        </div>
-      </div>
-      <p style="max-width:560px; margin:10px auto 0; color:#7e6aa8; font-size:11px; text-align:center;">
-        Handled • Secure Verification
-      </p>
-    </div>
-    """
 
 def save_otp_to_redis(email: str, otp_code: str, expire_seconds=600):
     redis_client.set(f"otp:{email}", otp_code, ex=expire_seconds)
@@ -119,12 +83,17 @@ def signup(
         send_email,
         subject="Verify your Handled account",
         email_to=email,
-        body=build_otp_email_html(
+        body=otp_email_html(
             title="Verify your Handled account",
             otp_code=otp_code,
-            subtitle="Thanks for signing up. Use the code below to verify your email address.",
             purpose="Email verification"
         )
+    )
+    background_tasks.add_task(
+        send_email,
+        subject="Welcome to Handled",
+        email_to=email,
+        body=welcome_email_html(username)
     )
 
     return {
@@ -147,10 +116,9 @@ def verify_email(otp_data: OTPVerify, background_tasks: BackgroundTasks, db: Ses
             send_email,
             subject="Your Handled verification code",
             email_to=otp_data.email,
-            body=build_otp_email_html(
+            body=otp_email_html(
                 title="Email verification code",
                 otp_code=otp_code,
-                subtitle="Use this code to verify your email address.",
                 purpose="Email verification"
             )
         )
@@ -189,12 +157,11 @@ def send_verify_email_otp(request: OTPRequest, background_tasks: BackgroundTasks
         send_email,
         subject="Your Handled verification code",
         email_to=request.email,
-        body=build_otp_email_html(
-            title="Email verification code",
-            otp_code=otp_code,
-            subtitle="Use this code to verify your email address.",
-            purpose="Email verification"
-        )
+            body=otp_email_html(
+                title="Email verification code",
+                otp_code=otp_code,
+                purpose="Email verification"
+            )
     )
     return {"message": "Verification OTP sent"}
 
@@ -210,11 +177,12 @@ def login(user: UserLogin, background_tasks: BackgroundTasks, db: Session = Depe
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Send login warning email
+    login_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     background_tasks.add_task(
         send_email,
-        subject="New login to your Handled account",
+        subject="New login detected",
         email_to=user.email,
-        body=f"<p>Your account was logged in on {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>"
+        body=login_alert_email_html(login_time_utc=login_time)
     )
 
     return {
@@ -241,10 +209,9 @@ def forgot_password(request: OTPRequest, background_tasks: BackgroundTasks):
         send_email,
         subject="Reset your Handled password",
         email_to=request.email,
-        body=build_otp_email_html(
+        body=otp_email_html(
             title="Reset your Handled password",
             otp_code=otp_code,
-            subtitle="We received a request to reset your password. Use the code below to continue.",
             purpose="Password reset"
         )
     )

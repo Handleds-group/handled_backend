@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
 from app.dependencies import get_current_user
+from app.email_utils import send_email, account_deleted_email_html
 from app.pagination import paginate
 from app.files import save_upload_file
 
@@ -88,11 +89,19 @@ def change_password(
 
 @router.delete("/me")
 def delete_my_account(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
+    email_to = current_user.email
     db.delete(current_user)
     db.commit()
+    background_tasks.add_task(
+        send_email,
+        subject="Your Handled account was deleted",
+        email_to=email_to,
+        body=account_deleted_email_html()
+    )
     return {"message": "Account deleted successfully"}
 
 @router.get("/{user_id}", response_model=UserOut)
