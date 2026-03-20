@@ -1,4 +1,5 @@
 import asyncio
+import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.health import check_services
@@ -48,3 +49,32 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
                 {"detail": f"Request timed out after {self.timeout} seconds"},
                 status_code=504
             )
+
+# --------------------------
+# Rate Limiting Middleware
+# --------------------------
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, requests_per_minute: int = 60):
+        super().__init__(app)
+        self.requests_per_minute = requests_per_minute
+
+    async def dispatch(self, request, call_next):
+        # Skip rate limiting for docs
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        window = int(time.time() // 60)
+        key = f"rate:{client_ip}:{window}"
+
+        try:
+            count = redis_client.incr(key)
+            if count == 1:
+                redis_client.expire(key, 60)
+            if count > self.requests_per_minute:
+                return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+        except Exception:
+            # If Redis is down, do not block requests
+            pass
+
+        return await call_next(request)

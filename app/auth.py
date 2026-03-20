@@ -12,6 +12,7 @@ from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
 import random, string, datetime
 from app.redis_client import redis_client
+from app.files import save_upload_file
 
 router = APIRouter()
 
@@ -94,6 +95,7 @@ def signup(
 
     # Save user (hashed password)
     hashed_pw = pbkdf2_sha256.hash(password)
+    profile_path = save_upload_file(profile_pic)
     new_user = User(
         username=username,
         email=email,
@@ -102,7 +104,7 @@ def signup(
         gender=gender,
         description=description,
         allergic=allergic,
-        profile_pic=profile_pic.filename,  # store filename
+        profile_pic=profile_path,
         password_hash=hashed_pw,
         is_verified=False
     )

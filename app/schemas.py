@@ -23,10 +23,27 @@ class UserUpdate(BaseModel):
     description: Optional[str]
     allergic: Optional[str]
 
+class UserProfileUpdate(BaseModel):
+    username: Optional[str]
+    email: Optional[EmailStr]
+    allergic: Optional[str]
+    description: Optional[str]
+    profile_pic: Optional[str]
+
+class UserProfileOut(BaseModel):
+    username: Optional[str]
+    email: Optional[EmailStr]
+    allergic: Optional[str]
+    description: Optional[str]
+    profile_pic: Optional[str]
+
+    class Config:
+        from_attributes = True
+
 class UserOut(BaseModel):
     id: int
     username: str
-    email: EmailStr
+    email: str
     age: Optional[int]
     occupation: Optional[str]
     gender: Optional[str]
@@ -49,3 +66,8 @@ class OTPRequest(BaseModel):
 class OTPVerify(BaseModel):
     email: EmailStr
     otp_code: Optional[str] = None
+
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_password: str
