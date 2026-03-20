@@ -25,10 +25,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if request.method in ["POST", "PUT"]:
             key = request.headers.get("Idempotency-Key")
             if key:
-                exists = await redis_client.get(key)
+                exists = redis_client.get(key)
                 if exists:
                     return JSONResponse({"detail": "Duplicate request detected"}, status_code=409)
-                await redis_client.set(key, "1", ex=300)  # Store key for 5 minutes
+                redis_client.set(key, "1", ex=300)  # Store key for 5 minutes
         return await call_next(request)
 
 # --------------------------

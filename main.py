@@ -26,8 +26,8 @@ app.include_router(history_router, prefix="/history", tags=["History"])
 app.include_router(health_router, prefix="/health", tags=["Health"])
 
 @app.on_event("startup")
-async def on_startup():
-    await init_db()
+def on_startup():
+    init_db()
 
 @app.get("/")
 async def root():
