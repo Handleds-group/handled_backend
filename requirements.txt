@@ -17,3 +17,6 @@ redis
 celery
 pytest
 asyncpg
+aioredis
+distutils
+setuptools

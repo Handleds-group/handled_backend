@@ -1,18 +1,15 @@
-python - <<'PY'
-import os, asyncio, asyncpg
-from dotenv import load_dotenv
+import asyncio
+import redis.asyncio as redis
+from urllib.parse import quote
 
-load_dotenv()
-url = os.getenv("DATABASE_URL").replace("postgresql+asyncpg://", "postgresql://")
-print("URL:", url)
+password = "Ae0000095tDxmLzIz/aIvo26P3k9FFCGK6XFIc+/CFBfsUw/P7Fjqz5vIP+6wsu8yWCEMME"
+encoded_password = quote(password, safe='')
 
-async def main():
-    try:
-        conn = await asyncpg.connect(url)
-        val = await conn.fetchval("SELECT 1")
-        print("DB OK:", val)
-        await conn.close()
-    except Exception as e:
-        print("DB ERROR:", type(e).__name__, e)
+REDIS_URL = f"redis://default:{encoded_password}@handled-iefh-ghai-875671.leapcell.cloud:6379/0?ssl=true&ssl_cert_reqs=required"
 
-asyncio.run(main())
+async def test_redis():
+    r = redis.from_url(REDIS_URL)
+    pong = await r.ping()
+    print("Redis ping:", pong)
+
+asyncio.run(test_redis())
