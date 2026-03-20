@@ -48,4 +48,4 @@ class OTPRequest(BaseModel):
 
 class OTPVerify(BaseModel):
     email: EmailStr
-    otp_code: str
+    otp_code: Optional[str] = None

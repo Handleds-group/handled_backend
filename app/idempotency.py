@@ -1,15 +1,6 @@
 # app/middleware/idempotency.py
 from fastapi import Request, HTTPException
-import redis
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-REDIS_URL = os.getenv("REDIS_URL")
-if not REDIS_URL:
-    raise RuntimeError("REDIS_URL is not set in environment")
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)  # sync redis
+from app.redis_client import redis_client
 
 def check_idempotency(request: Request):
     """
