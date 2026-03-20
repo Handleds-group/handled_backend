@@ -2,6 +2,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserLogin, OTPVerify, TokenSchema, OTPRequest
@@ -60,8 +61,8 @@ async def signup(
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
     # Check existing user
-    result = await db.execute(User.__table__.select().where(User.email == email))
-    existing_user = result.scalar()
+    result = await db.execute(select(User).where(User.email == email))
+    existing_user = result.scalars().first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -110,8 +111,8 @@ async def verify_email(otp_data: OTPVerify, db: AsyncSession = Depends(get_db)):
     if otp_saved != otp_data.otp_code:
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
-    result = await db.execute(User.__table__.select().where(User.email == otp_data.email))
-    user = result.scalar()
+    result = await db.execute(select(User).where(User.email == otp_data.email))
+    user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -130,8 +131,8 @@ async def verify_email(otp_data: OTPVerify, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenSchema)
 async def login(user: UserLogin, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(User.__table__.select().where(User.email == user.email))
-    db_user = result.scalar()
+    result = await db.execute(select(User).where(User.email == user.email))
+    db_user = result.scalars().first()
     if not db_user or not bcrypt.verify(user.password, db_user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -187,8 +188,8 @@ async def reset_password(
     if not otp_saved or otp_saved != otp_data.otp_code:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
-    result = await db.execute(User.__table__.select().where(User.email == otp_data.email))
-    user = result.scalar()
+    result = await db.execute(select(User).where(User.email == otp_data.email))
+    user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 

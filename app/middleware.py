@@ -2,13 +2,16 @@ import asyncio
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.health import check_services
-from app.idempotency import redis
+from app.idempotency import redis_client
 
 # --------------------------
 # Kill Switch / Fail-Fast
 # --------------------------
 class KillSwitchMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        # Allow docs/metadata even if dependencies are down
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
         healthy, msg = await check_services()
         if not healthy:
             return JSONResponse({"error": f"Service unavailable: {msg}"}, status_code=503)
@@ -22,10 +25,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if request.method in ["POST", "PUT"]:
             key = request.headers.get("Idempotency-Key")
             if key:
-                exists = await redis.get(key)
+                exists = await redis_client.get(key)
                 if exists:
                     return JSONResponse({"detail": "Duplicate request detected"}, status_code=409)
-                await redis.set(key, "1", ex=300)  # Store key for 5 minutes
+                await redis_client.set(key, "1", ex=300)  # Store key for 5 minutes
         return await call_next(request)
 
 # --------------------------

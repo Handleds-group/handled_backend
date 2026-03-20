@@ -12,7 +12,7 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "A78BFA")  # default light purple
 
-async def send_email(subject: str, email_to: str, body: str, cta_text: str = None, cta_link: str = None):
+def send_email(subject: str, email_to: str, body: str, cta_text: str = None, cta_link: str = None):
     """
     Sends a daisy-like, detailed HTML email using smtplib.
     Optional CTA button: cta_text + cta_link
@@ -43,7 +43,7 @@ async def send_email(subject: str, email_to: str, body: str, cta_text: str = Non
             <p style='font-size: 16px; color:#4B5563; line-height: 1.6;'>Hi there,</p>
             <p style='font-size: 16px; color:#4B5563; line-height: 1.6;'>{body}</p>
             {cta_html}
-            <p style='font-size: 14px; color:#9CA3AF; margin-top: 25px;'>If you didn’t request this email, you can safely ignore it.</p>
+            <p style='font-size: 14px; color:#9CA3AF; margin-top: 25px;'>If you didn't request this email, you can safely ignore it.</p>
         </div>
 
         <!-- Footer -->
@@ -61,6 +61,9 @@ async def send_email(subject: str, email_to: str, body: str, cta_text: str = Non
     msg['To'] = email_to
     msg.set_content("This email requires an HTML compatible email client.")
     msg.add_alternative(html_body, subtype='html')
+
+    if not all([SMTP_SERVER, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_FROM]):
+        raise RuntimeError("Email settings are not fully configured in environment")
 
     # Send email
     try:

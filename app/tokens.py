@@ -7,6 +7,11 @@ REFRESH_SECRET = os.getenv("REFRESH_TOKEN_SECRET")
 ACCESS_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 REFRESH_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
+if not ACCESS_SECRET:
+    raise RuntimeError("ACCESS_TOKEN_SECRET is not set in environment")
+if not REFRESH_SECRET:
+    raise RuntimeError("REFRESH_TOKEN_SECRET is not set in environment")
+
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_EXPIRE_MINUTES)

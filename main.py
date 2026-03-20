@@ -5,6 +5,7 @@ from app.decision import router as decision_router
 from app.history import router as history_router
 from app.health import router as health_router
 from app.middleware import KillSwitchMiddleware, IdempotencyMiddleware, TimeoutMiddleware
+from app.database import init_db
 
 app = FastAPI(title="Handled Backend")
 
@@ -23,6 +24,10 @@ app.include_router(users_router, prefix="/users", tags=["Users"])
 app.include_router(decision_router, prefix="/decision", tags=["Decision"])
 app.include_router(history_router, prefix="/history", tags=["History"])
 app.include_router(health_router, prefix="/health", tags=["Health"])
+
+@app.on_event("startup")
+async def on_startup():
+    await init_db()
 
 @app.get("/")
 async def root():
