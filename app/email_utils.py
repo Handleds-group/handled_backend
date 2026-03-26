@@ -1,21 +1,31 @@
 import os
 from dotenv import load_dotenv
-import httpx
+import smtplib
+from email.message import EmailMessage
 
 load_dotenv()
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-RESEND_FROM = os.getenv("RESEND_FROM")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")  # default darker purple
+LANDING_PAGE_URL = os.getenv("LANDING_PAGE_URL", "https://handleds.vercel.app")
+EMAIL_LOGO_URL = os.getenv("EMAIL_LOGO_URL") or f"{LANDING_PAGE_URL}/images/handled-app-icon.png"
 
-BG_COLOR = "#F3ECFF"
-CARD_BG = "#FFFFFF"
+BG_COLOR = "#E3D7F8"
+CARD_BG = "#F6F3F3"
 BORDER_COLOR = "#E4D7FF"
-MUTED_TEXT = "#6B5A8A"
-TEXT_COLOR = "#3F325B"
+MUTED_TEXT = "#665487"
+TEXT_COLOR = "#40315F"
 
 def _render_email_shell(title: str, subtitle: str, content_html: str, footer_note: str | None = None) -> str:
     footer = footer_note or "If you didn't request this email, you can safely ignore it."
+    clarification_html = (
+        f'Need clarification? Visit <a href="{LANDING_PAGE_URL}" '
+        f'style="color:#{EMAIL_THEME_COLOR}; text-decoration:none; font-weight:600;">handleds.vercel.app</a>.'
+    )
     return f"""
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG_COLOR}; padding:24px 12px;">
       <tr>
@@ -23,7 +33,18 @@ def _render_email_shell(title: str, subtitle: str, content_html: str, footer_not
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px; background:{CARD_BG}; border:1px solid {BORDER_COLOR}; border-radius:16px; overflow:hidden;">
             <tr>
               <td style="padding:18px 22px; background:#E9DDFF;">
-                <h1 style="margin:0; font-family:Arial, sans-serif; font-size:22px; color:#{EMAIL_THEME_COLOR};">Handled</h1>
+                <table role="presentation" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding-right:10px;">
+                      <a href="{LANDING_PAGE_URL}" style="text-decoration:none;">
+                        <img src="{EMAIL_LOGO_URL}" alt="Handled icon" width="28" height="28" style="display:block; width:28px; height:28px; border-radius:6px;">
+                      </a>
+                    </td>
+                    <td>
+                      <h1 style="margin:0; font-family:Arial, sans-serif; font-size:22px; color:#{EMAIL_THEME_COLOR};">Handled</h1>
+                    </td>
+                  </tr>
+                </table>
                 <p style="margin:6px 0 0; font-family:Arial, sans-serif; color:{MUTED_TEXT}; font-size:13px;">{subtitle}</p>
               </td>
             </tr>
@@ -32,13 +53,14 @@ def _render_email_shell(title: str, subtitle: str, content_html: str, footer_not
                 <h2 style="margin:0 0 10px; font-size:18px; color:#{EMAIL_THEME_COLOR};">{title}</h2>
                 {content_html}
                 <p style="margin:18px 0 0; font-size:12px; color:{MUTED_TEXT};">{footer}</p>
+                <p style="margin:8px 0 0; font-size:12px; color:{MUTED_TEXT};">{clarification_html}</p>
               </td>
             </tr>
           </table>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;">
             <tr>
               <td style="padding-top:10px; text-align:center; font-family:Arial, sans-serif; font-size:11px; color:{MUTED_TEXT};">
-                Handled • Secure Messages • 2026
+                Handled &bull; Secure Messages &bull; 2026
               </td>
             </tr>
           </table>
@@ -67,22 +89,22 @@ def otp_email_html(title: str, otp_code: str, purpose: str) -> str:
 
 def welcome_email_html(username: str) -> str:
     content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">Welcome {username}! We’re happy you’re here.</p>
+    <p style="margin:0 0 12px; font-size:14px;">Welcome {username}! We're happy you're here.</p>
     <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
       <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:6px;">Getting started</div>
-      <div>• Verify your email</div>
-      <div>• Complete your profile</div>
-      <div>• Explore decisions and history</div>
+      <div>&bull; Verify your email</div>
+      <div>&bull; Complete your profile</div>
+      <div>&bull; Explore decisions and history</div>
     </div>
     """
-    return _render_email_shell(title="Welcome to Handled", subtitle="Let’s get you set up", content_html=content)
+    return _render_email_shell(title="Welcome to Handled", subtitle="Let's get you set up", content_html=content)
 
 def login_alert_email_html(login_time_utc: str) -> str:
     content = f"""
     <p style="margin:0 0 12px; font-size:14px;">We detected a login to your account.</p>
     <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
       <div>Time (UTC): {login_time_utc}</div>
-      <div>If this wasn’t you, change your password immediately.</div>
+      <div>If this wasn't you, change your password immediately.</div>
     </div>
     """
     return _render_email_shell(title="New login detected", subtitle="Security notice", content_html=content)
@@ -94,30 +116,27 @@ def account_deleted_email_html() -> str:
       <div>If this was not you, contact support right away.</div>
     </div>
     """
-    return _render_email_shell(title="Account deleted", subtitle="We’re sorry to see you go", content_html=content)
+    return _render_email_shell(title="Account deleted", subtitle="We're sorry to see you go", content_html=content)
 
 def send_email(subject: str, email_to: str, body: str):
     """
-    Sends a HTML email using Resend API.
+    Sends a HTML email using smtplib (STARTTLS).
     """
-    if not RESEND_API_KEY or not RESEND_FROM:
-        raise RuntimeError("RESEND_API_KEY or RESEND_FROM is not set in environment")
+    if not all([SMTP_SERVER, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_FROM]):
+        raise RuntimeError("SMTP settings are not fully configured in environment")
 
-    payload = {
-        "from": RESEND_FROM,
-        "to": [email_to],
-        "subject": subject,
-        "html": body,
-    }
-
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = email_to
+    msg.set_content("This email requires an HTML compatible email client.")
+    msg.add_alternative(body, subtype="html")
 
     try:
-        resp = httpx.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=20)
-        resp.raise_for_status()
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
     except Exception as e:
-        print("Error sending email via Resend:", e)
+        print("Error sending email via SMTP:", e)
         raise e

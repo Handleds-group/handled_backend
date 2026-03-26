@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import declarative_base
@@ -31,3 +31,14 @@ class OTP(Base):
     type = Column(String, nullable=False)  # signup / forgot_password
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class DecisionHistory(Base):
+    __tablename__ = "decision_history"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True)
+
+    input_text = Column(Text)
+    ai_response = Column(Text)
+
+    created_at = Column(DateTime)    

@@ -18,3 +18,4 @@ celery
 pytest
 asyncpg
 setuptools
+openai
