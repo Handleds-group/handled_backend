@@ -71,3 +71,15 @@ class ChangePassword(BaseModel):
     old_password: str
     new_password: str
     confirm_password: str
+
+class BugReportCreate(BaseModel):
+    name: Optional[str] = None
+    error_message: str
+
+class BugReportOut(BaseModel):
+    id: int
+    name: Optional[str] = None
+    error_message: str
+
+    class Config:
+        from_attributes = True

@@ -19,3 +19,5 @@ pytest
 asyncpg
 setuptools
 openai
+stripe
+pydantic-settings

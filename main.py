@@ -9,6 +9,7 @@ from app.middleware import KillSwitchMiddleware, IdempotencyMiddleware, TimeoutM
 from app.database import init_db
 from app.decision_routes import router as decision_router
 from app.decision_service import generate_decision
+from app.bug_reports import router as bug_reports_router
 
 app = FastAPI(title="Handled Backend")
 
@@ -31,6 +32,7 @@ app.include_router(users_router, prefix="/users", tags=["Users"])
 app.include_router(decision_router, prefix="/decisions", tags=["Decisions"])
 app.include_router(history_router, prefix="/history", tags=["History"])
 app.include_router(health_router, prefix="/health", tags=["Health"])
+app.include_router(bug_reports_router, prefix="/bug-reports", tags=["Bug Reports"])
 
 @app.on_event("startup")
 def on_startup():

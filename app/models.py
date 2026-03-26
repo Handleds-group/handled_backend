@@ -42,3 +42,11 @@ class DecisionHistory(Base):
     ai_response = Column(Text)
 
     created_at = Column(DateTime)    
+
+class BugReport(Base):
+    __tablename__ = "bug_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    error_message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
