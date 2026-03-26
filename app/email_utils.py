@@ -11,8 +11,10 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")  # default darker purple
-LANDING_PAGE_URL = os.getenv("LANDING_PAGE_URL", "https://handleds.vercel.app")
-EMAIL_LOGO_URL = os.getenv("EMAIL_LOGO_URL") or f"{LANDING_PAGE_URL}/images/handled-app-icon.png"
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "60"))
+LANDING_PAGE_URL = "https://handleds.vercel.app"
+EMAIL_LOGO_PATH = os.path.join("images", "handled-app-icon.png")
+LOGO_CID = "handled-logo"
 
 BG_COLOR = "#E3D7F8"
 CARD_BG = "#F6F3F3"
@@ -23,9 +25,10 @@ TEXT_COLOR = "#40315F"
 def _render_email_shell(title: str, subtitle: str, content_html: str, footer_note: str | None = None) -> str:
     footer = footer_note or "If you didn't request this email, you can safely ignore it."
     clarification_html = (
-        f'Need clarification? Visit <a href="{LANDING_PAGE_URL}" '
+        f'Visit our offical site <a href="{LANDING_PAGE_URL}" '
         f'style="color:#{EMAIL_THEME_COLOR}; text-decoration:none; font-weight:600;">handleds.vercel.app</a>.'
     )
+    logo_src = f"cid:{LOGO_CID}"
     return f"""
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG_COLOR}; padding:24px 12px;">
       <tr>
@@ -33,14 +36,16 @@ def _render_email_shell(title: str, subtitle: str, content_html: str, footer_not
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px; background:{CARD_BG}; border:1px solid {BORDER_COLOR}; border-radius:16px; overflow:hidden;">
             <tr>
               <td style="padding:18px 22px; background:#E9DDFF;">
-                <table role="presentation" cellpadding="0" cellspacing="0">
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;">
                   <tr>
-                    <td style="padding-right:10px;">
+                    <td align="center" style="padding-bottom:10px;">
                       <a href="{LANDING_PAGE_URL}" style="text-decoration:none;">
-                        <img src="{EMAIL_LOGO_URL}" alt="Handled icon" width="28" height="28" style="display:block; width:28px; height:28px; border-radius:6px;">
+                        <img src="{logo_src}" alt="Handled icon" width="96" height="96" style="display:block; width:96px; height:96px; border-radius:50%; border:3px solid #E1D2FF; background:#F6F3F3;">
                       </a>
                     </td>
-                    <td>
+                  </tr>
+                  <tr>
+                    <td align="center">
                       <h1 style="margin:0; font-family:Arial, sans-serif; font-size:22px; color:#{EMAIL_THEME_COLOR};">Handled</h1>
                     </td>
                   </tr>
@@ -132,11 +137,29 @@ def send_email(subject: str, email_to: str, body: str):
     msg.set_content("This email requires an HTML compatible email client.")
     msg.add_alternative(body, subtype="html")
 
+    # Embed logo inline for better mobile client support (some block remote images).
     try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
+        with open(EMAIL_LOGO_PATH, "rb") as logo_file:
+            logo_bytes = logo_file.read()
+        html_part = msg.get_payload()[1]
+        html_part.add_related(logo_bytes, maintype="image", subtype="png", cid=LOGO_CID)
+    except FileNotFoundError:
+        pass
+
+    try:
+        attempt = 0
+        last_error = None
+        while attempt < 2:
+            attempt += 1
+            try:
+                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                    server.starttls()
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                    server.send_message(msg)
+                return
+            except (TimeoutError, smtplib.SMTPServerDisconnected, smtplib.SMTPDataError) as e:
+                last_error = e
+        raise last_error if last_error else RuntimeError("Email send failed")
     except Exception as e:
         print("Error sending email via SMTP:", e)
         raise e
