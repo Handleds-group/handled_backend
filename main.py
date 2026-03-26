@@ -10,6 +10,7 @@ from app.database import init_db
 from app.decision_routes import router as decision_router
 from app.decision_service import generate_decision
 from app.bug_reports import router as bug_reports_router
+from app.payment_routes import router as payment_router
 
 app = FastAPI(title="Handled Backend")
 
@@ -33,6 +34,7 @@ app.include_router(decision_router, prefix="/decisions", tags=["Decisions"])
 app.include_router(history_router, prefix="/history", tags=["History"])
 app.include_router(health_router, prefix="/health", tags=["Health"])
 app.include_router(bug_reports_router, prefix="/bug-reports", tags=["Bug Reports"])
+app.include_router(payment_router, prefix="/payments", tags=["Payments"])
 
 @app.on_event("startup")
 def on_startup():

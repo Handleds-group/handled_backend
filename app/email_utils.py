@@ -123,6 +123,17 @@ def account_deleted_email_html() -> str:
     """
     return _render_email_shell(title="Account deleted", subtitle="We're sorry to see you go", content_html=content)
 
+def payment_success_email_html(plan: str) -> str:
+    plan_label = plan.capitalize()
+    content = f"""
+    <p style="margin:0 0 12px; font-size:14px;">Your payment was successful.</p>
+    <div style="background:#F7F3FF; border:1px solid #E4D7FF; padding:12px; border-radius:10px; font-size:13px; color:#6B5A8A;">
+      <div><strong>Plan:</strong> {plan_label}</div>
+      <div>Thanks for supporting Handled.</div>
+    </div>
+    """
+    return _render_email_shell(title="Payment Successful", subtitle="Subscription activated", content_html=content)
+
 def send_email(subject: str, email_to: str, body: str):
     """
     Sends a HTML email using smtplib (STARTTLS).

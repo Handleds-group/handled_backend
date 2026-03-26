@@ -83,3 +83,11 @@ class BugReportOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PaymentCheckoutRequest(BaseModel):
+    user_id: str
+    plan: str
+    email: str
+
+class PaymentCheckoutResponse(BaseModel):
+    checkout_url: str

@@ -19,6 +19,9 @@ class User(Base):
     profile_pic = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     is_verified = Column(Boolean, default=False)
+    is_premium = Column(Boolean, default=False)
+    plan = Column(String, nullable=True)
+    subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
