@@ -14,8 +14,8 @@ if not STRIPE_SUCCESS_URL or not STRIPE_CANCEL_URL:
     raise RuntimeError("STRIPE_SUCCESS_URL or STRIPE_CANCEL_URL is not set in environment")
 
 PRICE_IDS = {
-    "pro": "prod_UDitFqvCXn66sV",
-    "premium": "prod_UDiCS7HMCkmMQR",
+    "pro": "price_1TFHRhJlP5JNMWILrC1RwRpt",
+    "premium": "price_1TFGmSJlP5JNMWILEczZECIc",
 }
 
 stripe.api_key = STRIPE_SECRET_KEY
