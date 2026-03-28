@@ -137,12 +137,13 @@ def payment_success_email_html(plan: str) -> str:
     """
     return _render_email_shell(title="Payment Successful", subtitle="Subscription activated", content_html=content)
 
-def send_email(subject: str, email_to: str, body: str):
+def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
     """
     Sends a HTML email using smtplib (STARTTLS).
+    Returns (success, error_message).
     """
     if not all([SMTP_SERVER, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_FROM]):
-        raise RuntimeError("SMTP settings are not fully configured in environment")
+        return False, "missing SMTP settings in environment"
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -160,20 +161,38 @@ def send_email(subject: str, email_to: str, body: str):
     except FileNotFoundError:
         pass
 
-    try:
-        attempt = 0
-        last_error = None
-        while attempt < 2:
-            attempt += 1
-            try:
-                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                    server.starttls()
-                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
-                    server.send_message(msg)
-                return
-            except (TimeoutError, smtplib.SMTPServerDisconnected, smtplib.SMTPDataError) as e:
-                last_error = e
-        raise last_error if last_error else RuntimeError("Email send failed")
-    except Exception as e:
-        print("Error sending email via SMTP:", e)
-        raise e
+    attempt = 0
+    last_error: Exception | None = None
+    while attempt < 2:
+        attempt += 1
+        try:
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+            return True, None
+        except (TimeoutError, smtplib.SMTPServerDisconnected, smtplib.SMTPDataError) as e:
+            last_error = e
+        except smtplib.SMTPAuthenticationError as e:
+            return False, f"authentication failed: {e}"
+        except smtplib.SMTPConnectError as e:
+            return False, f"connect failed: {e}"
+        except smtplib.SMTPException as e:
+            last_error = e
+        except Exception as e:
+            last_error = e
+            break
+
+    if last_error:
+        return False, str(last_error)
+    return False, "unknown error"
+
+def send_email(subject: str, email_to: str, body: str) -> bool:
+    """
+    Sends a HTML email using smtplib (STARTTLS).
+    Returns True on success, False on failure.
+    """
+    success, error = send_email_with_error(subject, email_to, body)
+    if not success:
+        print("Error sending email via SMTP:", error)
+    return success

@@ -10,7 +10,7 @@ from app.database import SessionLocal
 from app.models import User
 from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse
 from app.stripe_service import create_checkout_session
-from app.email_utils import send_email, payment_success_email_html
+from app.email_utils import send_email, send_email_with_error, payment_success_email_html
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ if not STRIPE_WEBHOOK_SECRET:
     raise RuntimeError("STRIPE_WEBHOOK_SECRET is not set in environment")
 
 router = APIRouter()
+EMAIL_DEBUG_ENABLED = os.getenv("EMAIL_DEBUG_ENABLED", "false").lower() == "true"
 
 def _get_user_by_id(db: Session, user_id: str) -> Optional[User]:
     try:
@@ -46,14 +47,13 @@ def _set_subscription(
     db.commit()
 
 def _send_payment_email(email: str, plan: str):
-    try:
-        send_email(
-            subject="Payment Successful",
-            email_to=email,
-            body=payment_success_email_html(plan),
-        )
-    except Exception as exc:
-        logger.error("Failed to send payment email: %s", exc)
+    success = send_email(
+        subject="Payment Successful",
+        email_to=email,
+        body=payment_success_email_html(plan),
+    )
+    if not success:
+        logger.error("Failed to send payment email (SMTP error)")
 
 @router.post("/create-checkout", response_model=PaymentCheckoutResponse)
 def create_checkout(payload: PaymentCheckoutRequest):
@@ -83,8 +83,8 @@ async def stripe_webhook(request: Request):
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid payload") from exc
 
-    event_type = event.get("type")
-    data_object = event.get("data", {}).get("object", {})
+    event_type = event["type"]
+    data_object = event["data"]["object"]
 
     db = SessionLocal()
     try:
@@ -138,3 +138,14 @@ async def stripe_webhook(request: Request):
         db.close()
 
     return {"status": "ok"}
+
+@router.get("/debug-email")
+def debug_email(email: str):
+    if not EMAIL_DEBUG_ENABLED:
+        raise HTTPException(status_code=403, detail="Email debug is disabled")
+    success, error = send_email_with_error(
+        subject="Handled SMTP Debug",
+        email_to=email,
+        body=payment_success_email_html("pro"),
+    )
+    return {"success": success, "error": error}
