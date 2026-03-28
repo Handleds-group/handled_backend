@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from app.files import ensure_upload_dir
 from app.auth import router as auth_router
@@ -10,7 +10,7 @@ from app.database import init_db
 from app.decision_routes import router as decision_router
 from app.decision_service import generate_decision
 from app.bug_reports import router as bug_reports_router
-from app.payment_routes import router as payment_router
+from app.payment_routes import router as payment_router, stripe_webhook
 from app.web_pages import router as web_pages_router
 
 app = FastAPI(title="Handled Backend")
@@ -44,7 +44,12 @@ def on_startup():
     init_db()
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/images", StaticFiles(directory="images"), name="images")
 
 @app.get("/")
 async def root():
     return {"message": "Handled backend running with KillSwitch, OTP, idempotency, and timeout!"}
+
+@app.post("/webhook")
+async def stripe_webhook_root(request: Request):
+    return await stripe_webhook(request)

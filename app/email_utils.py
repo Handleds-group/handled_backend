@@ -127,9 +127,12 @@ def payment_success_email_html(plan: str) -> str:
     plan_label = plan.capitalize()
     content = f"""
     <p style="margin:0 0 12px; font-size:14px;">Your payment was successful.</p>
-    <div style="background:#F7F3FF; border:1px solid #E4D7FF; padding:12px; border-radius:10px; font-size:13px; color:#6B5A8A;">
+    <div style="background:#F7F3FF; border:1px dashed #D8C6F7; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
+      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:6px;">Payment summary</div>
       <div><strong>Plan:</strong> {plan_label}</div>
-      <div>Thanks for supporting Handled.</div>
+      <div><strong>Status:</strong> Active</div>
+      <div><strong>Access:</strong> Premium features enabled</div>
+      <div style="margin-top:8px;">Thanks for supporting Handled.</div>
     </div>
     """
     return _render_email_shell(title="Payment Successful", subtitle="Subscription activated", content_html=content)
