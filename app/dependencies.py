@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from app.database import SessionLocal
 from jose import jwt, JWTError
+from datetime import datetime
 import os
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -28,6 +29,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         user = result.scalars().first()
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
+        user.last_seen = datetime.utcnow()
+        session.add(user)
+        session.commit()
         return user
     finally:
         session.close()

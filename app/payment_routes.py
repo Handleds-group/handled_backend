@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 import stripe
 
 from app.database import SessionLocal
-from app.models import User
+from app.models import User, PaymentTransaction
 from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse
 from app.stripe_service import create_checkout_session
 from app.email_utils import send_email, send_email_with_error, payment_success_email_html
@@ -55,6 +55,39 @@ def _send_payment_email(email: str, plan: str):
     if not success:
         logger.error("Failed to send payment email (SMTP error)")
 
+def _record_transaction(
+    db: Session,
+    user_id: Optional[str],
+    plan: Optional[str],
+    amount: Optional[int],
+    currency: Optional[str],
+    status: str,
+    reference: Optional[str],
+):
+    if amount is None:
+        return
+    user_id_int = None
+    if user_id:
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            user_id_int = None
+    if reference:
+        existing = db.execute(select(PaymentTransaction).where(PaymentTransaction.reference == reference)).scalars().first()
+        if existing:
+            return
+    txn = PaymentTransaction(
+        user_id=user_id_int,
+        plan=plan,
+        amount=amount,
+        currency=currency or "usd",
+        status=status,
+        provider="stripe",
+        reference=reference,
+    )
+    db.add(txn)
+    db.commit()
+
 @router.post("/create-checkout", response_model=PaymentCheckoutResponse)
 def create_checkout(payload: PaymentCheckoutRequest):
     try:
@@ -95,6 +128,15 @@ async def stripe_webhook(request: Request):
             subscription_id = data_object.get("subscription")
             if user_id and plan:
                 _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
+            _record_transaction(
+                db=db,
+                user_id=user_id,
+                plan=plan,
+                amount=data_object.get("amount_total"),
+                currency=data_object.get("currency"),
+                status="completed",
+                reference=data_object.get("id"),
+            )
 
             email = (
                 data_object.get("customer_details", {}).get("email")
@@ -115,6 +157,15 @@ async def stripe_webhook(request: Request):
                 user_id = metadata.get("user_id")
             if user_id and plan:
                 _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
+            _record_transaction(
+                db=db,
+                user_id=user_id,
+                plan=plan,
+                amount=data_object.get("amount_paid"),
+                currency=data_object.get("currency"),
+                status="succeeded",
+                reference=data_object.get("id"),
+            )
 
             if billing_reason == "subscription_create":
                 email = data_object.get("customer_email")

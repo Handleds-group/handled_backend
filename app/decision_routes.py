@@ -8,14 +8,14 @@ import uuid
 from .decision_service import generate_decision
 from .database import get_db   # your existing DB connection
 
-from .models import DecisionHistory  # we’ll define below
+from .models import DecisionHistory, User  # we'll define below
 
-router = APIRouter(prefix="/decisions", tags=["Decisions"])
+router = APIRouter(tags=["Decisions"])
 
 
 # 🧠 CREATE DECISION
 @router.post("/make")
-async def make_decision(user_input: str, user_id: str, db: Session = Depends(get_db)):
+async def make_decision(user_input: str, user_id: str, tokens_used: int = 0, db: Session = Depends(get_db)):
     
     if not user_input:
         raise HTTPException(status_code=400, detail="Input is required")
@@ -32,6 +32,17 @@ async def make_decision(user_input: str, user_id: str, db: Session = Depends(get
 
     db.add(decision)
     db.commit()
+
+    # Best-effort token usage tracking
+    try:
+        user_id_int = int(user_id)
+        user = db.query(User).filter(User.id == user_id_int).first()
+        if user and tokens_used > 0:
+            user.tokens_used = (user.tokens_used or 0) + tokens_used
+            db.add(user)
+            db.commit()
+    except Exception:
+        pass
 
     return {
         "message": "Decision generated successfully",

@@ -1,0 +1,242 @@
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, func, or_
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.pagination import paginate
+from app.models import (
+    User,
+    BugReport,
+    PaymentTransaction,
+    Notification,
+    Wallet,
+    WithdrawalRequest,
+    DecisionHistory,
+)
+from app.admin.dependencies import require_admin, verify_admin_password
+from app.admin.schemas import (
+    AdminLoginRequest,
+    AdminLoginResponse,
+    AdminUserListOut,
+    AdminUserProfileOut,
+    BugReportAdminOut,
+    PaymentTransactionOut,
+    NotificationCreate,
+    NotificationOut,
+    PaymentSummaryByCurrency,
+    WalletOut,
+    WithdrawalCreate,
+    WithdrawalOut,
+)
+from app.tokens import create_access_token
+
+router = APIRouter()
+
+@router.post("/login", response_model=AdminLoginResponse)
+def admin_login(payload: AdminLoginRequest):
+    if not verify_admin_password(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+    token = create_access_token({"admin": True})
+    return AdminLoginResponse(access_token=token)
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        if len(value) == 10:
+            return datetime.fromisoformat(value + "T00:00:00")
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {value}")
+
+def _ensure_wallet(db: Session, currency: str = "usd") -> Wallet:
+    wallet = db.execute(select(Wallet)).scalars().first()
+    if wallet:
+        return wallet
+    wallet = Wallet(balance=0, currency=currency)
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+@router.get("/users", response_model=list[AdminUserListOut], dependencies=[Depends(require_admin)])
+def admin_list_users(
+    q: Optional[str] = None,
+    is_premium: Optional[bool] = None,
+    registered_from: Optional[str] = None,
+    registered_to: Optional[str] = None,
+    last_seen_from: Optional[str] = None,
+    last_seen_to: Optional[str] = None,
+    pagination: dict = Depends(paginate),
+    db: Session = Depends(get_db),
+):
+    limit, offset = pagination["limit"], pagination["offset"]
+    query = select(User)
+
+    if q:
+        like = f"%{q}%"
+        query = query.where(or_(User.username.ilike(like), User.email.ilike(like)))
+    if is_premium is not None:
+        query = query.where(User.is_premium == is_premium)
+
+    reg_from = _parse_date(registered_from)
+    reg_to = _parse_date(registered_to)
+    if reg_from:
+        query = query.where(User.created_at >= reg_from)
+    if reg_to:
+        query = query.where(User.created_at <= reg_to)
+
+    seen_from = _parse_date(last_seen_from)
+    seen_to = _parse_date(last_seen_to)
+    if seen_from:
+        query = query.where(User.last_seen >= seen_from)
+    if seen_to:
+        query = query.where(User.last_seen <= seen_to)
+
+    result = db.execute(query.limit(limit).offset(offset))
+    users = result.scalars().all()
+    return users
+
+@router.get("/users/{user_id}/profile", response_model=AdminUserProfileOut, dependencies=[Depends(require_admin)])
+def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
+    user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    txns = db.execute(
+        select(PaymentTransaction)
+        .where(PaymentTransaction.user_id == user_id)
+        .order_by(PaymentTransaction.created_at.desc())
+        .limit(5)
+    ).scalars().all()
+
+    profile = AdminUserProfileOut.model_validate(user)
+    profile.last_premium_transactions = [
+        PaymentTransactionOut.model_validate(t) for t in txns
+    ]
+    return profile
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
+def admin_delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.query(DecisionHistory).filter(DecisionHistory.user_id == str(user_id)).delete()
+    db.query(BugReport).filter(BugReport.user_id == user_id).delete()
+    db.query(PaymentTransaction).filter(PaymentTransaction.user_id == user_id).delete()
+    db.query(Notification).filter(Notification.user_id == user_id).delete()
+
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully"}
+
+@router.get("/users/{user_id}/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
+def admin_user_bug_reports(user_id: int, db: Session = Depends(get_db)):
+    reports = db.execute(
+        select(BugReport).where(BugReport.user_id == user_id).order_by(BugReport.created_at.desc())
+    ).scalars().all()
+    return reports
+
+@router.get("/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
+def admin_all_bug_reports(
+    pagination: dict = Depends(paginate),
+    db: Session = Depends(get_db),
+):
+    limit, offset = pagination["limit"], pagination["offset"]
+    reports = db.execute(
+        select(BugReport).order_by(BugReport.created_at.desc()).limit(limit).offset(offset)
+    ).scalars().all()
+    return reports
+
+@router.get("/payments/summary", response_model=list[PaymentSummaryByCurrency], dependencies=[Depends(require_admin)])
+def admin_payments_summary(db: Session = Depends(get_db)):
+    rows = db.execute(
+        select(
+            PaymentTransaction.currency,
+            func.coalesce(func.sum(PaymentTransaction.amount), 0),
+            func.count(PaymentTransaction.id),
+        )
+        .where(PaymentTransaction.status.in_(["completed", "succeeded"]))
+        .group_by(PaymentTransaction.currency)
+    ).all()
+    summary = []
+    for currency, total_amount, total_count in rows:
+        summary.append(
+            PaymentSummaryByCurrency(
+                currency=currency,
+                total_amount=int(total_amount),
+                total_count=int(total_count),
+            )
+        )
+    return summary
+
+@router.get("/wallet", response_model=WalletOut, dependencies=[Depends(require_admin)])
+def admin_wallet(db: Session = Depends(get_db)):
+    wallet = _ensure_wallet(db)
+    return wallet
+
+@router.post("/wallet/collate", response_model=WalletOut, dependencies=[Depends(require_admin)])
+def admin_wallet_collate(db: Session = Depends(get_db)):
+    wallet = _ensure_wallet(db)
+    total_in = db.execute(
+        select(func.coalesce(func.sum(PaymentTransaction.amount), 0))
+        .where(PaymentTransaction.status.in_(["completed", "succeeded"]))
+    ).scalar_one()
+    total_out = db.execute(
+        select(func.coalesce(func.sum(WithdrawalRequest.amount), 0))
+        .where(WithdrawalRequest.status.in_(["approved", "paid"]))
+    ).scalar_one()
+    wallet.balance = int(total_in) - int(total_out)
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+@router.post("/withdrawals", response_model=WithdrawalOut, dependencies=[Depends(require_admin)])
+def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_db)):
+    wallet = _ensure_wallet(db, currency=(payload.currency or "usd"))
+    currency = payload.currency or wallet.currency
+    if wallet.balance < payload.amount:
+        raise HTTPException(status_code=400, detail="Insufficient wallet balance")
+    wallet.balance -= payload.amount
+    req = WithdrawalRequest(
+        amount=payload.amount,
+        currency=currency,
+        destination=payload.destination,
+        status="pending",
+    )
+    db.add(wallet)
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
+
+@router.get("/withdrawals", response_model=list[WithdrawalOut], dependencies=[Depends(require_admin)])
+def admin_withdrawals(
+    pagination: dict = Depends(paginate),
+    db: Session = Depends(get_db),
+):
+    limit, offset = pagination["limit"], pagination["offset"]
+    reqs = db.execute(
+        select(WithdrawalRequest).order_by(WithdrawalRequest.created_at.desc()).limit(limit).offset(offset)
+    ).scalars().all()
+    return reqs
+
+@router.post("/notifications/send", response_model=NotificationOut, dependencies=[Depends(require_admin)])
+def admin_send_notification(payload: NotificationCreate, db: Session = Depends(get_db)):
+    user = db.execute(select(User).where(User.id == payload.user_id)).scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    note = Notification(
+        user_id=payload.user_id,
+        title=payload.title,
+        message=payload.message,
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note

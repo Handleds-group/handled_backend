@@ -52,6 +52,8 @@ def update_my_profile(
         current_user.description = payload.description
     if payload.profile_pic is not None:
         current_user.profile_pic = payload.profile_pic
+    if payload.profile_pic_secondary is not None:
+        current_user.profile_pic_secondary = payload.profile_pic_secondary
 
     db.add(current_user)
     db.commit()

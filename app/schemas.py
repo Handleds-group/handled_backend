@@ -29,6 +29,7 @@ class UserProfileUpdate(BaseModel):
     allergic: Optional[str]
     description: Optional[str]
     profile_pic: Optional[str]
+    profile_pic_secondary: Optional[str]
 
 class UserProfileOut(BaseModel):
     username: Optional[str]
@@ -36,6 +37,7 @@ class UserProfileOut(BaseModel):
     allergic: Optional[str]
     description: Optional[str]
     profile_pic: Optional[str]
+    profile_pic_secondary: Optional[str]
 
     class Config:
         from_attributes = True
@@ -51,6 +53,7 @@ class UserOut(BaseModel):
     allergic: Optional[str]
     profile_pic: Optional[str]
     is_verified: bool
+    is_premium: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -75,11 +78,13 @@ class ChangePassword(BaseModel):
 class BugReportCreate(BaseModel):
     name: Optional[str] = None
     error_message: str
+    user_id: Optional[int] = None
 
 class BugReportOut(BaseModel):
     id: int
     name: Optional[str] = None
     error_message: str
+    user_id: Optional[int] = None
 
     class Config:
         from_attributes = True
