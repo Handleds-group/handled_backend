@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-import app.files as files
 from app.auth import router as auth_router
 from app.users import router as users_router
 from app.health import router as health_router
@@ -15,9 +14,6 @@ from app.admin.routes import router as admin_router
 from app.notifications import router as notifications_router
 
 app = FastAPI(title="Handled Backend")
-
-# Ensure uploads directory exists before mounting static files
-files.ensure_upload_dir()
 
 # --------------------------
 # Middleware
@@ -42,10 +38,8 @@ app.include_router(notifications_router, prefix="/notifications", tags=["Notific
 
 @app.on_event("startup")
 def on_startup():
-    files.ensure_upload_dir()
     init_db()
 
-app.mount("/uploads", StaticFiles(directory=str(files.UPLOAD_DIR)), name="uploads")
 app.mount("/images", StaticFiles(directory="images"), name="images")
 
 @app.get("/")

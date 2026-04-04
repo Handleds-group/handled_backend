@@ -1,31 +1,40 @@
 import os
-import uuid
-from pathlib import Path
 from fastapi import UploadFile
-import shutil
+import cloudinary
+import cloudinary.uploader
 
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
+_cloudinary_configured = False
 
-def ensure_upload_dir():
-    global UPLOAD_DIR
-    try:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def _ensure_cloudinary_config():
+    global _cloudinary_configured
+    if _cloudinary_configured:
         return
-    except OSError:
-        # Fallback for read-only filesystems (e.g., some serverless runtimes)
-        fallback = Path(os.getenv("UPLOAD_DIR_FALLBACK", "/tmp/uploads"))
-        if fallback != UPLOAD_DIR:
-            UPLOAD_DIR = fallback
-            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-            return
-        raise
+    cloud_name = os.getenv("CLOUD_NAME")
+    api_key = os.getenv("API_KEY")
+    api_secret = os.getenv("API_SECRET")
+    if not cloud_name or not api_key or not api_secret:
+        raise RuntimeError("Cloudinary env vars missing: CLOUD_NAME, API_KEY, API_SECRET")
+    cloudinary.config(
+        cloud_name=cloud_name,
+        api_key=api_key,
+        api_secret=api_secret,
+        secure=True,
+    )
+    _cloudinary_configured = True
 
 
 def save_upload_file(upload: UploadFile) -> str:
-    ensure_upload_dir()
-    suffix = Path(upload.filename).suffix if upload.filename else ""
-    filename = f"{uuid.uuid4().hex}{suffix}"
-    dest_path = UPLOAD_DIR / filename
-    with dest_path.open("wb") as out_file:
-        shutil.copyfileobj(upload.file, out_file)
-    return f"/uploads/{filename}"
+    _ensure_cloudinary_config()
+    upload.file.seek(0)
+    result = cloudinary.uploader.upload(
+        upload.file,
+        resource_type="auto",
+        filename=upload.filename or None,
+        use_filename=True,
+        unique_filename=True,
+    )
+    secure_url = result.get("secure_url")
+    if not secure_url:
+        raise RuntimeError("Cloudinary upload failed: missing secure_url")
+    return secure_url
