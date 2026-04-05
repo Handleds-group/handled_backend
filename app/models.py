@@ -16,8 +16,6 @@ class User(Base):
     gender = Column(String, nullable=True)
     description = Column(String, nullable=True)
     allergic = Column(String, nullable=True)
-    profile_pic = Column(String, nullable=True)
-    profile_pic_secondary = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     is_verified = Column(Boolean, default=False)
     is_premium = Column(Boolean, default=False)

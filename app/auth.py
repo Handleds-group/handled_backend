@@ -1,18 +1,16 @@
 # app/auth.py
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserLogin, OTPVerify, TokenSchema, OTPRequest
+from app.schemas import UserLogin, OTPVerify, TokenSchema, OTPRequest, SignupRequest
 from app.tokens import create_access_token, create_refresh_token
 from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html
 from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
 import random, string, datetime
 from app.redis_client import redis_client
-from app.files import save_upload_file
 
 router = APIRouter()
 
@@ -34,21 +32,12 @@ def normalize_email(email: str) -> str:
 
 @router.post("/signup", response_model=TokenSchema)
 def signup(
+    payload: SignupRequest,
     background_tasks: BackgroundTasks,
-    username: str = Form(...),
-    email: str = Form(...),
-    age: int = Form(...),
-    occupation: str = Form(...),
-    gender: str = Form(...),
-    description: str = Form(...),
-    allergic: str = Form(...),
-    password: str = Form(...),
-    confirm_password: str = Form(...),
-    profile_pic: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    email = normalize_email(email)
-    if password != confirm_password:
+    email = normalize_email(payload.email)
+    if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
     # Check existing user
@@ -58,17 +47,15 @@ def signup(
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # Save user (hashed password)
-    hashed_pw = pbkdf2_sha256.hash(password)
-    profile_path = save_upload_file(profile_pic)
+    hashed_pw = pbkdf2_sha256.hash(payload.password)
     new_user = User(
-        username=username,
+        username=payload.username,
         email=email,
-        age=age,
-        occupation=occupation,
-        gender=gender,
-        description=description,
-        allergic=allergic,
-        profile_pic=profile_path,
+        age=payload.age,
+        occupation=payload.occupation,
+        gender=payload.gender,
+        description=payload.description,
+        allergic=payload.allergic,
         password_hash=hashed_pw,
         is_verified=False
     )
@@ -93,7 +80,7 @@ def signup(
         send_email,
         subject="Welcome to Handled",
         email_to=email,
-        body=welcome_email_html(username)
+        body=welcome_email_html(payload.username)
     )
 
     return {

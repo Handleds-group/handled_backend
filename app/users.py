@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
@@ -8,7 +8,6 @@ from app.schemas import UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, 
 from app.dependencies import get_current_user
 from app.email_utils import send_email, account_deleted_email_html
 from app.pagination import paginate
-from app.files import save_upload_file
 
 router = APIRouter()
 
@@ -50,24 +49,7 @@ def update_my_profile(
         current_user.allergic = payload.allergic
     if payload.description is not None:
         current_user.description = payload.description
-    if payload.profile_pic is not None:
-        current_user.profile_pic = payload.profile_pic
-    if payload.profile_pic_secondary is not None:
-        current_user.profile_pic_secondary = payload.profile_pic_secondary
 
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    return current_user
-
-@router.put("/me/profile-pic", response_model=UserProfileOut)
-def update_profile_pic(
-    profile_pic: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    profile_path = save_upload_file(profile_pic)
-    current_user.profile_pic = profile_path
     db.add(current_user)
     db.commit()
     db.refresh(current_user)

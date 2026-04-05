@@ -51,8 +51,6 @@ class AdminUserProfileOut(BaseModel):
     last_seen: Optional[datetime]
     is_premium: Optional[bool]
     tokens_used: Optional[int]
-    profile_pic: Optional[str]
-    profile_pic_secondary: Optional[str]
     last_premium_transactions: List[PaymentTransactionOut] = []
 
     class Config:

@@ -11,6 +11,17 @@ class UserCreate(BaseModel):
     allergic: Optional[str]
     password: str
 
+class SignupRequest(BaseModel):
+    username: str
+    email: EmailStr
+    age: Optional[int]
+    occupation: Optional[str]
+    gender: Optional[str]
+    description: Optional[str] = ""
+    allergic: Optional[str]
+    password: str
+    confirm_password: str
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
@@ -28,16 +39,12 @@ class UserProfileUpdate(BaseModel):
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
-    profile_pic: Optional[str]
-    profile_pic_secondary: Optional[str]
 
 class UserProfileOut(BaseModel):
     username: Optional[str]
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
-    profile_pic: Optional[str]
-    profile_pic_secondary: Optional[str]
 
     class Config:
         from_attributes = True
@@ -51,7 +58,6 @@ class UserOut(BaseModel):
     gender: Optional[str]
     description: Optional[str]
     allergic: Optional[str]
-    profile_pic: Optional[str]
     is_verified: bool
     is_premium: Optional[bool] = None
 

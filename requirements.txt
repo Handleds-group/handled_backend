@@ -21,4 +21,3 @@ setuptools
 openai
 stripe
 pydantic-settings
-cloudinary

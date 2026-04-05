@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
@@ -35,3 +35,19 @@ def init_db():
     from app.models import Base
 
     Base.metadata.create_all(bind=engine)
+    _ensure_user_columns()
+
+
+def _ensure_user_columns():
+    # Lightweight auto-migration for missing columns in "users" table.
+    # This avoids runtime failures when the DB schema lags behind models.
+    alter_statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE",
+    ]
+    with engine.begin() as conn:
+        for stmt in alter_statements:
+            conn.execute(text(stmt))
