@@ -47,6 +47,7 @@ def _ensure_user_columns():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE bug_reports ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)",
     ]
     with engine.begin() as conn:
         for stmt in alter_statements:
