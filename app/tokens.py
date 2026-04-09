@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from jose import jwt
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 ACCESS_SECRET = os.getenv("ACCESS_TOKEN_SECRET")
 REFRESH_SECRET = os.getenv("REFRESH_TOKEN_SECRET")
@@ -23,3 +26,9 @@ def create_refresh_token(data: dict):
     expire = datetime.utcnow() + timedelta(days=REFRESH_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, REFRESH_SECRET, algorithm="HS256")
+
+def decode_access_token(token: str):
+    return jwt.decode(token, ACCESS_SECRET, algorithms=["HS256"])
+
+def decode_refresh_token(token: str):
+    return jwt.decode(token, REFRESH_SECRET, algorithms=["HS256"])

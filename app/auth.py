@@ -4,11 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import UserLogin, OTPVerify, TokenSchema, OTPRequest, SignupRequest
-from app.tokens import create_access_token, create_refresh_token
+from app.schemas import UserLogin, OTPVerify, TokenSchema, OTPRequest, SignupRequest, RefreshTokenRequest
+from app.tokens import create_access_token, create_refresh_token, decode_refresh_token
 from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html
 from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
+from jose import ExpiredSignatureError, JWTError
 import random, string, datetime
 from app.redis_client import redis_client
 
@@ -85,7 +86,8 @@ def signup(
 
     return {
         "access_token": create_access_token({"user_id": new_user.id}),
-        "refresh_token": create_refresh_token({"user_id": new_user.id})
+        "refresh_token": create_refresh_token({"user_id": new_user.id}),
+        "token_type": "bearer",
     }
 
 # --------------------------
@@ -158,7 +160,8 @@ def send_verify_email_otp(request: OTPRequest, background_tasks: BackgroundTasks
 
 @router.post("/login", response_model=TokenSchema)
 def login(user: UserLogin, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    result = db.execute(select(User).where(User.email == user.email))
+    email = normalize_email(user.email)
+    result = db.execute(select(User).where(User.email == email))
     db_user = result.scalars().first()
     if not db_user or not pbkdf2_sha256.verify(user.password, db_user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -168,13 +171,36 @@ def login(user: UserLogin, background_tasks: BackgroundTasks, db: Session = Depe
     background_tasks.add_task(
         send_email,
         subject="New login detected",
-        email_to=user.email,
+        email_to=email,
         body=login_alert_email_html(login_time_utc=login_time)
     )
 
     return {
         "access_token": create_access_token({"user_id": db_user.id}),
-        "refresh_token": create_refresh_token({"user_id": db_user.id})
+        "refresh_token": create_refresh_token({"user_id": db_user.id}),
+        "token_type": "bearer",
+    }
+
+@router.post("/refresh", response_model=TokenSchema)
+def refresh_token(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+    try:
+        token_payload = decode_refresh_token(payload.refresh_token)
+        user_id = token_payload.get("user_id")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "access_token": create_access_token({"user_id": user.id}),
+        "refresh_token": create_refresh_token({"user_id": user.id}),
+        "token_type": "bearer",
     }
 
 
