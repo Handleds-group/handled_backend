@@ -1,5 +1,5 @@
 # app/auth.py
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -231,13 +231,27 @@ def forgot_password(request: OTPRequest, background_tasks: BackgroundTasks):
     return {"message": "OTP sent to your email"}
 
 @router.post("/reset-password")
-def reset_password(
-    email: str = Form(...),
-    otp_code: str = Form(...),
-    new_password: str = Form(...),
-    confirm_password: str = Form(...),
+async def reset_password(
+    request: Request,
     db: Session = Depends(get_db)
 ):
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        email = form.get("email")
+        otp_code = form.get("otp_code")
+        new_password = form.get("new_password")
+        confirm_password = form.get("confirm_password")
+    else:
+        payload = await request.json()
+        email = payload.get("email")
+        otp_code = payload.get("otp_code")
+        new_password = payload.get("new_password")
+        confirm_password = payload.get("confirm_password")
+
+    if not email or not otp_code or not new_password or not confirm_password:
+        raise HTTPException(status_code=422, detail="email, otp_code, new_password and confirm_password are required")
+
     email = normalize_email(email)
     if new_password != confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
