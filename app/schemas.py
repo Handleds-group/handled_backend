@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 
 class UserCreate(BaseModel):
@@ -85,6 +85,14 @@ class BugReportCreate(BaseModel):
     name: Optional[str] = None
     error_message: str
     user_id: Optional[int] = None
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def normalize_user_id(cls, value):
+        if value is None or value == "":
+            return None
+        user_id = int(value)
+        return user_id if user_id > 0 else None
 
 class BugReportOut(BaseModel):
     id: int
