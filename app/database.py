@@ -20,7 +20,12 @@ engine = create_engine(
     pool_pre_ping=True,
     connect_args={"connect_timeout": 20},
 )
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
 
 # Dependency
 def get_db():

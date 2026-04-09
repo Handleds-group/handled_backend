@@ -232,20 +232,21 @@ def forgot_password(request: OTPRequest, background_tasks: BackgroundTasks):
 
 @router.post("/reset-password")
 def reset_password(
-    otp_data: OTPVerify,
+    email: str = Form(...),
+    otp_code: str = Form(...),
     new_password: str = Form(...),
     confirm_password: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    otp_data.email = normalize_email(otp_data.email)
+    email = normalize_email(email)
     if new_password != confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
-    otp_saved = get_otp_from_redis(otp_data.email)
-    if not otp_saved or otp_saved != otp_data.otp_code:
+    otp_saved = get_otp_from_redis(email)
+    if not otp_saved or otp_saved != otp_code:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
-    result = db.execute(select(User).where(User.email == otp_data.email))
+    result = db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -253,6 +254,6 @@ def reset_password(
     user.password_hash = pbkdf2_sha256.hash(new_password)
     db.add(user)
     db.commit()
-    redis_client.delete(f"otp:{otp_data.email}")
+    redis_client.delete(f"otp:{email}")
 
     return {"message": "Password reset successfully"}
