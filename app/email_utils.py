@@ -1,20 +1,14 @@
 import os
 from dotenv import load_dotenv
-import smtplib
-from email.message import EmailMessage
+import requests
 
 load_dotenv()
 
-SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-EMAIL_FROM = os.getenv("EMAIL_FROM")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_FROM = os.getenv("RESEND_FROM")
+EMAIL_FROM = os.getenv("EMAIL_FROM", RESEND_FROM)
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")  # default darker purple
-SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "60"))
 LANDING_PAGE_URL = "https://handleds.vercel.app"
-EMAIL_LOGO_PATH = os.path.join("images", "handled-app-icon.png")
-LOGO_CID = "handled-logo"
 
 BG_COLOR = "#E3D7F8"
 CARD_BG = "#F6F3F3"
@@ -28,7 +22,7 @@ def _render_email_shell(title: str, subtitle: str, content_html: str, footer_not
         f'Visit our offical site <a href="{LANDING_PAGE_URL}" '
         f'style="color:#{EMAIL_THEME_COLOR}; text-decoration:none; font-weight:600;">handleds.vercel.app</a>.'
     )
-    logo_src = f"cid:{LOGO_CID}"
+    logo_src = "https://handleds.vercel.app/handled-app-icon.png"
     return f"""
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG_COLOR}; padding:24px 12px;">
       <tr>
@@ -139,60 +133,46 @@ def payment_success_email_html(plan: str) -> str:
 
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
     """
-    Sends a HTML email using smtplib (STARTTLS).
+    Sends a HTML email using Resend API.
     Returns (success, error_message).
     """
-    if not all([SMTP_SERVER, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_FROM]):
-        return False, "missing SMTP settings in environment"
+    if not RESEND_API_KEY:
+        return False, "missing RESEND_API_KEY in environment"
+    if not EMAIL_FROM:
+        return False, "missing EMAIL_FROM in environment"
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_FROM
-    msg["To"] = email_to
-    msg.set_content("This email requires an HTML compatible email client.")
-    msg.add_alternative(body, subtype="html")
+    url = "https://api.resend.com/emails"
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "from": EMAIL_FROM,
+        "to": email_to,
+        "subject": subject,
+        "html": body
+    }
 
-    # Embed logo inline for better mobile client support (some block remote images).
     try:
-        with open(EMAIL_LOGO_PATH, "rb") as logo_file:
-            logo_bytes = logo_file.read()
-        html_part = msg.get_payload()[1]
-        html_part.add_related(logo_bytes, maintype="image", subtype="png", cid=LOGO_CID)
-    except FileNotFoundError:
-        pass
-
-    attempt = 0
-    last_error: Exception | None = None
-    while attempt < 2:
-        attempt += 1
-        try:
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                server.starttls()
-                server.login(SMTP_USERNAME, SMTP_PASSWORD)
-                server.send_message(msg)
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code == 200:
             return True, None
-        except (TimeoutError, smtplib.SMTPServerDisconnected, smtplib.SMTPDataError) as e:
-            last_error = e
-        except smtplib.SMTPAuthenticationError as e:
-            return False, f"authentication failed: {e}"
-        except smtplib.SMTPConnectError as e:
-            return False, f"connect failed: {e}"
-        except smtplib.SMTPException as e:
-            last_error = e
-        except Exception as e:
-            last_error = e
-            break
-
-    if last_error:
-        return False, str(last_error)
-    return False, "unknown error"
+        else:
+            error_msg = response.text or f"HTTP {response.status_code}"
+            return False, error_msg
+    except requests.Timeout:
+        return False, "Resend API timeout"
+    except requests.ConnectionError as e:
+        return False, f"connection error: {e}"
+    except Exception as e:
+        return False, str(e)
 
 def send_email(subject: str, email_to: str, body: str) -> bool:
     """
-    Sends a HTML email using smtplib (STARTTLS).
+    Sends a HTML email using Resend API.
     Returns True on success, False on failure.
     """
     success, error = send_email_with_error(subject, email_to, body)
     if not success:
-        print("Error sending email via SMTP:", error)
+        print("Error sending email via Resend:", error)
     return success

@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 import stripe
@@ -103,7 +103,7 @@ def create_checkout(payload: PaymentCheckoutRequest):
     return PaymentCheckoutResponse(checkout_url=checkout_url)
 
 @router.post("/webhook")
-async def stripe_webhook(request: Request):
+async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
     if not sig_header:
@@ -143,7 +143,7 @@ async def stripe_webhook(request: Request):
                 or data_object.get("customer_email")
             )
             if email and plan:
-                _send_payment_email(email, plan)
+                background_tasks.add_task(_send_payment_email, email, plan)
 
         elif event_type == "invoice.payment_succeeded":
             subscription_id = data_object.get("subscription")
@@ -170,7 +170,7 @@ async def stripe_webhook(request: Request):
             if billing_reason == "subscription_create":
                 email = data_object.get("customer_email")
                 if email and plan:
-                    _send_payment_email(email, plan)
+                    background_tasks.add_task(_send_payment_email, email, plan)
 
         elif event_type == "invoice.payment_failed":
             logger.warning("Invoice payment failed: %s", data_object.get("id"))
