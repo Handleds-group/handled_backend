@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import UserLogin, OTPVerify, TokenSchema, OTPRequest, SignupRequest, RefreshTokenRequest
+from app.schemas import UserLogin, TokenSchema, OTPRequest, SignupRequest, RefreshTokenRequest
 from app.tokens import create_access_token, create_refresh_token, decode_refresh_token
 from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html
 from app.dependencies import get_current_user
@@ -58,25 +58,13 @@ def signup(
         description=payload.description,
         allergic=payload.allergic,
         password_hash=hashed_pw,
-        is_verified=False
+        is_verified=True
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # Generate OTP and send email
-    otp_code = generate_otp()
-    save_otp_to_redis(email, otp_code)
-    background_tasks.add_task(
-        send_email,
-        subject="Verify your Handled account",
-        email_to=email,
-        body=otp_email_html(
-            title="Verify your Handled account",
-            otp_code=otp_code,
-            purpose="Email verification"
-        )
-    )
+    # Send welcome email
     background_tasks.add_task(
         send_email,
         subject="Welcome to Handled",
@@ -89,70 +77,6 @@ def signup(
         "refresh_token": create_refresh_token({"user_id": new_user.id}),
         "token_type": "bearer",
     }
-
-# --------------------------
-# Verify Email OTP
-# --------------------------
-
-@router.post("/verify-email")
-def verify_email(otp_data: OTPVerify, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    otp_data.email = normalize_email(otp_data.email)
-    # If no otp_code provided, send a new OTP
-    if not otp_data.otp_code:
-        otp_code = generate_otp()
-        save_otp_to_redis(otp_data.email, otp_code)
-        background_tasks.add_task(
-            send_email,
-            subject="Your Handled verification code",
-            email_to=otp_data.email,
-            body=otp_email_html(
-                title="Email verification code",
-                otp_code=otp_code,
-                purpose="Email verification"
-            )
-        )
-        return {"message": "Verification OTP sent"}
-
-    otp_saved = get_otp_from_redis(otp_data.email)
-    if not otp_saved:
-        raise HTTPException(status_code=400, detail="OTP expired or not found")
-    if otp_saved != otp_data.otp_code:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-
-    result = db.execute(select(User).where(User.email == otp_data.email))
-    user = result.scalars().first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
-
-    user.is_verified = True
-    db.add(user)
-    db.commit()
-
-    # Delete OTP from Redis
-    redis_client.delete(f"otp:{otp_data.email}")
-
-    return {"message": "Email verified successfully"}
-
-# --------------------------
-# Resend Verify Email OTP
-# --------------------------
-
-@router.post("/verify-email/send")
-def send_verify_email_otp(request: OTPRequest, background_tasks: BackgroundTasks):
-    request.email = normalize_email(request.email)
-    otp_code = generate_otp()
-    save_otp_to_redis(request.email, otp_code)
-    background_tasks.add_task(
-        send_email,
-        subject="Your Handled verification code",
-        email_to=request.email,
-            body=otp_email_html(
-                title="Email verification code",
-                otp_code=otp_code,
-                purpose="Email verification"
-            )
-    )
-    return {"message": "Verification OTP sent"}
 
 # --------------------------
 # Login

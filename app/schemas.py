@@ -75,10 +75,6 @@ class RefreshTokenRequest(BaseModel):
 class OTPRequest(BaseModel):
     email: EmailStr
 
-class OTPVerify(BaseModel):
-    email: EmailStr
-    otp_code: Optional[str] = None
-
 class ChangePassword(BaseModel):
     old_password: str
     new_password: str

@@ -1,13 +1,17 @@
 import os
+import smtplib
+from email.message import EmailMessage
 from dotenv import load_dotenv
-import requests
 
 load_dotenv()
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-RESEND_FROM = os.getenv("RESEND_FROM")
-EMAIL_FROM = os.getenv("EMAIL_FROM", RESEND_FROM)
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+EMAIL_FROM = os.getenv("EMAIL_FROM") or SMTP_USERNAME
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")  # default darker purple
+EMAIL_DEBUG_ENABLED = os.getenv("EMAIL_DEBUG_ENABLED", "false").lower() == "true"
 LANDING_PAGE_URL = "https://handleds.vercel.app"
 
 BG_COLOR = "#E3D7F8"
@@ -133,46 +137,52 @@ def payment_success_email_html(plan: str) -> str:
 
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
     """
-    Sends a HTML email using Resend API.
+    Sends an HTML email using SMTP.
     Returns (success, error_message).
     """
-    if not RESEND_API_KEY:
-        return False, "missing RESEND_API_KEY in environment"
+    if not SMTP_SERVER:
+        return False, "missing SMTP_SERVER in environment"
+    if not SMTP_PORT:
+        return False, "missing SMTP_PORT in environment"
     if not EMAIL_FROM:
-        return False, "missing EMAIL_FROM in environment"
+        return False, "missing EMAIL_FROM or SMTP_USERNAME in environment"
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        return False, "missing SMTP_USERNAME or SMTP_PASSWORD in environment"
 
-    url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "from": EMAIL_FROM,
-        "to": email_to,
-        "subject": subject,
-        "html": body
-    }
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = email_to
+    msg.set_content("Please view this email in an HTML capable client.")
+    msg.add_alternative(body, subtype="html")
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return True, None
+        if EMAIL_DEBUG_ENABLED:
+            print(f"Sending email via SMTP to {email_to} using {SMTP_SERVER}:{SMTP_PORT}")
+
+        if SMTP_PORT == 465:
+            smtp_client = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=20)
         else:
-            error_msg = response.text or f"HTTP {response.status_code}"
-            return False, error_msg
-    except requests.Timeout:
-        return False, "Resend API timeout"
-    except requests.ConnectionError as e:
-        return False, f"connection error: {e}"
-    except Exception as e:
-        return False, str(e)
+            smtp_client = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20)
+
+        with smtp_client as smtp:
+            smtp.ehlo()
+            if SMTP_PORT != 465:
+                smtp.starttls()
+                smtp.ehlo()
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(msg)
+
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
 
 def send_email(subject: str, email_to: str, body: str) -> bool:
     """
-    Sends a HTML email using Resend API.
+    Sends an HTML email using SMTP.
     Returns True on success, False on failure.
     """
     success, error = send_email_with_error(subject, email_to, body)
     if not success:
-        print("Error sending email via Resend:", error)
+        print("Error sending email via SMTP:", error)
     return success
