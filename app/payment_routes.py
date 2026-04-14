@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from typing import Optional
@@ -10,7 +11,7 @@ from app.database import SessionLocal
 from app.models import User, PaymentTransaction
 from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse
 from app.stripe_service import create_checkout_session
-from app.email_utils import send_email, send_email_with_error, payment_success_email_html
+from app.email_utils import send_email, payment_receipt_email_html
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +47,33 @@ def _set_subscription(
     db.add(user)
     db.commit()
 
-def _send_payment_email(email: str, plan: str):
+def _send_payment_email(
+    email: str,
+    plan: str,
+    amount: Optional[int],
+    currency: Optional[str],
+    status: str,
+    reference: Optional[str],
+    payment_method: Optional[str] = None,
+    purchased_at: Optional[str] = None,
+    billing_reason: Optional[str] = None,
+):
     success = send_email(
-        subject="Payment Successful",
+        subject="Your Handled payment receipt",
         email_to=email,
-        body=payment_success_email_html(plan),
+        body=payment_receipt_email_html(
+            plan=plan,
+            amount=amount,
+            currency=currency,
+            status=status,
+            reference=reference,
+            payment_method=payment_method,
+            purchased_at=purchased_at,
+            billing_reason=billing_reason,
+        ),
     )
     if not success:
-        logger.error("Failed to send payment email (SMTP error)")
+        logger.error("Failed to send payment receipt email (SMTP error)")
 
 def _record_transaction(
     db: Session,
@@ -128,14 +148,21 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
             subscription_id = data_object.get("subscription")
             if user_id and plan:
                 _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
+            amount = data_object.get("amount_total")
+            currency = data_object.get("currency")
+            reference = data_object.get("id")
+            status = data_object.get("payment_status") or "completed"
+            payment_method = ", ".join(data_object.get("payment_method_types", []) or []) or None
+            purchased_at = datetime.datetime.utcfromtimestamp(event.get("created", datetime.datetime.utcnow().timestamp())).strftime("%Y-%m-%d %H:%M:%S UTC")
+
             _record_transaction(
                 db=db,
                 user_id=user_id,
                 plan=plan,
-                amount=data_object.get("amount_total"),
-                currency=data_object.get("currency"),
-                status="completed",
-                reference=data_object.get("id"),
+                amount=amount,
+                currency=currency,
+                status=status,
+                reference=reference,
             )
 
             email = (
@@ -143,7 +170,17 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 or data_object.get("customer_email")
             )
             if email and plan:
-                background_tasks.add_task(_send_payment_email, email, plan)
+                background_tasks.add_task(
+                    _send_payment_email,
+                    email,
+                    plan,
+                    amount,
+                    currency,
+                    status,
+                    reference,
+                    payment_method,
+                    purchased_at,
+                )
 
         elif event_type == "invoice.payment_succeeded":
             subscription_id = data_object.get("subscription")
@@ -155,22 +192,40 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 metadata = subscription.get("metadata", {})
                 plan = metadata.get("plan")
                 user_id = metadata.get("user_id")
+            amount = data_object.get("amount_paid")
+            currency = data_object.get("currency")
+            reference = data_object.get("id")
+            status = data_object.get("status") or "succeeded"
+            payment_method = None
+            purchased_at = datetime.datetime.utcfromtimestamp(event.get("created", datetime.datetime.utcnow().timestamp())).strftime("%Y-%m-%d %H:%M:%S UTC")
+
             if user_id and plan:
                 _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
             _record_transaction(
                 db=db,
                 user_id=user_id,
                 plan=plan,
-                amount=data_object.get("amount_paid"),
-                currency=data_object.get("currency"),
-                status="succeeded",
-                reference=data_object.get("id"),
+                amount=amount,
+                currency=currency,
+                status=status,
+                reference=reference,
             )
 
             if billing_reason == "subscription_create":
                 email = data_object.get("customer_email")
                 if email and plan:
-                    background_tasks.add_task(_send_payment_email, email, plan)
+                    background_tasks.add_task(
+                        _send_payment_email,
+                        email,
+                        plan,
+                        amount,
+                        currency,
+                        status,
+                        reference,
+                        payment_method,
+                        purchased_at,
+                        billing_reason,
+                    )
 
         elif event_type == "invoice.payment_failed":
             logger.warning("Invoice payment failed: %s", data_object.get("id"))
@@ -194,9 +249,18 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 def debug_email(email: str):
     if not EMAIL_DEBUG_ENABLED:
         raise HTTPException(status_code=403, detail="Email debug is disabled")
-    success, error = send_email_with_error(
-        subject="Handled SMTP Debug",
+    success = send_email(
+        subject="Handled SMTP Debug Receipt",
         email_to=email,
-        body=payment_success_email_html("pro"),
+        body=payment_receipt_email_html(
+            plan="pro",
+            amount=1499,
+            currency="usd",
+            status="succeeded",
+            reference="DEBUG-RECEIPT-12345",
+            payment_method="card",
+            purchased_at=datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            billing_reason="subscription_create",
+        ),
     )
-    return {"success": success, "error": error}
+    return {"success": success, "error": None if success else "SMTP send failed"}

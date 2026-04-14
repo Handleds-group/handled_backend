@@ -121,6 +121,15 @@ def account_deleted_email_html() -> str:
     """
     return _render_email_shell(title="Account deleted", subtitle="We're sorry to see you go", content_html=content)
 
+def _format_currency(amount: int | None, currency: str | None) -> str:
+    if amount is None or currency is None:
+        return "Not available"
+    try:
+        return f"{amount / 100:,.2f} {currency.upper()}"
+    except Exception:
+        return f"{amount} {currency.upper() if currency else ''}"
+
+
 def payment_success_email_html(plan: str) -> str:
     plan_label = plan.capitalize()
     content = f"""
@@ -134,6 +143,54 @@ def payment_success_email_html(plan: str) -> str:
     </div>
     """
     return _render_email_shell(title="Payment Successful", subtitle="Subscription activated", content_html=content)
+
+
+def payment_receipt_email_html(
+    plan: str,
+    amount: int | None,
+    currency: str | None,
+    status: str,
+    reference: str | None,
+    payment_method: str | None = None,
+    purchased_at: str | None = None,
+    billing_reason: str | None = None,
+) -> str:
+    plan_label = plan.capitalize() if plan else "Handled subscription"
+    amount_text = _format_currency(amount, currency)
+    purchased_at_text = purchased_at or "Just now"
+    payment_method_text = payment_method or "Card"
+    billing_reason_html = f"<div><strong>Billing reason:</strong> {billing_reason}</div>" if billing_reason else ""
+
+    content = f"""
+    <p style="margin:0 0 12px; font-size:14px;">Thank you for your payment. This is your official receipt.</p>
+    <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:14px; border-radius:12px; font-size:13px; color:{MUTED_TEXT};">
+      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:12px;">Receipt details</div>
+      <div style="margin-bottom:10px;">
+        <div><strong>Plan:</strong> {plan_label}</div>
+        <div><strong>Amount paid:</strong> {amount_text}</div>
+        <div><strong>Currency:</strong> {currency.upper() if currency else 'N/A'}</div>
+        <div><strong>Status:</strong> {status.capitalize()}</div>
+        <div><strong>Reference:</strong> {reference or 'N/A'}</div>
+        <div><strong>Payment method:</strong> {payment_method_text}</div>
+        <div><strong>Date:</strong> {purchased_at_text}</div>
+        {billing_reason_html}
+      </div>
+    </div>
+    <div style="background:#FFFFFF; border:1px solid #D7D0F3; border-radius:12px; padding:16px; font-size:13px; color:{TEXT_COLOR}; margin-top:14px;">
+      <h3 style="margin:0 0 8px; font-size:15px; color:#{EMAIL_THEME_COLOR};">Receipt summary</h3>
+      <ul style="margin:0 0 0 16px; padding:0; color:{MUTED_TEXT};">
+        <li>Subscription plan activated</li>
+        <li>Premium access enabled</li>
+        <li>Reference saved for your records</li>
+      </ul>
+    </div>
+    <div style="margin-top:14px; font-size:13px; color:{MUTED_TEXT};">
+      <p style="margin:0 0 8px;">If you have questions, reply to this message or visit our website.</p>
+      <p style="margin:0;">Handled is here to help you stay focused and on track.</p>
+    </div>
+    """
+    return _render_email_shell(title="Payment Receipt", subtitle="Your purchase details", content_html=content, footer_note="This email is your official receipt for your Handled payment.")
+
 
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
     """
