@@ -1,5 +1,5 @@
 # app/auth.py
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -20,9 +20,20 @@ def generate_otp(length=6):
 
 def save_otp_to_redis(email: str, otp_code: str, expire_seconds=600):
     redis_client.set(f"otp:{email}", otp_code, ex=expire_seconds)
+    redis_client.set(f"otp_code:{otp_code}", email, ex=expire_seconds)
 
 def get_otp_from_redis(email: str):
     return redis_client.get(f"otp:{email}")
+
+
+def get_email_from_otp(otp_code: str):
+    return redis_client.get(f"otp_code:{otp_code}")
+
+
+def delete_otp_from_redis(email: str, otp_code: str):
+    redis_client.delete(f"otp:{email}")
+    redis_client.delete(f"otp_code:{otp_code}")
+
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
@@ -155,33 +166,23 @@ def forgot_password(request: OTPRequest, background_tasks: BackgroundTasks):
     return {"message": "OTP sent to your email"}
 
 @router.post("/reset-password")
-async def reset_password(
-    request: Request,
+def reset_password(
+    otp_code: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    content_type = (request.headers.get("content-type") or "").lower()
-    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
-        form = await request.form()
-        email = form.get("email")
-        otp_code = form.get("otp_code")
-        new_password = form.get("new_password")
-        confirm_password = form.get("confirm_password")
-    else:
-        payload = await request.json()
-        email = payload.get("email")
-        otp_code = payload.get("otp_code")
-        new_password = payload.get("new_password")
-        confirm_password = payload.get("confirm_password")
+    if not otp_code or not new_password or not confirm_password:
+        raise HTTPException(status_code=422, detail="otp_code, new_password and confirm_password are required")
 
-    if not email or not otp_code or not new_password or not confirm_password:
-        raise HTTPException(status_code=422, detail="email, otp_code, new_password and confirm_password are required")
-
-    email = normalize_email(email)
     if new_password != confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
-    otp_saved = get_otp_from_redis(email)
-    if not otp_saved or otp_saved != otp_code:
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+
+    email = get_email_from_otp(otp_code)
+    if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     result = db.execute(select(User).where(User.email == email))
@@ -192,6 +193,6 @@ async def reset_password(
     user.password_hash = pbkdf2_sha256.hash(new_password)
     db.add(user)
     db.commit()
-    redis_client.delete(f"otp:{email}")
+    delete_otp_from_redis(email, otp_code)
 
     return {"message": "Password reset successfully"}
