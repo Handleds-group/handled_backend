@@ -46,7 +46,13 @@ async def generate_decision(user_input: str, model: str = "gpt-4o-mini"):
             max_tokens=500
         )
 
-        return response.choices[0].message.content
+        return {
+            "response": response.choices[0].message.content,
+            "tokens_used": response.usage.total_tokens if response.usage else 0
+        }
 
     except Exception as e:
-        return f"Error generating decision: {str(e)}"
+        return {
+            "response": f"Error generating decision: {str(e)}",
+            "tokens_used": 0
+        }

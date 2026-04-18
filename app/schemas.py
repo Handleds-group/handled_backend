@@ -121,6 +121,9 @@ class DecisionResponseData(BaseModel):
     decision_id: str
     response: str
     cached: bool
+    tier: str
+    remaining_decisions_today: Optional[int] = None
+    monthly_tokens_remaining: Optional[int] = None
 
 
 class DecisionResponse(BaseModel):

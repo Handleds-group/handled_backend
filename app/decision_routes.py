@@ -11,7 +11,7 @@ from .decision_service import generate_decision
 from .middleware import DecisionCacheMiddleware
 from .models import DecisionHistory, User
 from .schemas import DecisionRequest, DecisionResponse
-from .subscription_service import get_model_for_user
+from .subscription_service import can_make_decision, can_use_monthly_tokens, get_model_for_user, get_remaining_decisions, get_remaining_monthly_tokens, get_user_tier, record_decision_usage, record_monthly_token_usage
 
 router = APIRouter(tags=["Decisions"])
 
@@ -33,6 +33,17 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if not can_make_decision(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Free tier users can make up to 10 decisions per day. Upgrade to Pro or Premium for unlimited decisions."
+        )
+    if not can_use_monthly_tokens(user):
+        raise HTTPException(
+            status_code=403,
+            detail="You have reached your monthly token allocation for your current plan."
+        )
+
     selected_model = get_model_for_user(user)
     cached_result = DecisionCacheMiddleware.get_cached_response(
         user_input=user_input,
@@ -41,12 +52,15 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
 
     if cached_result:
         ai_response = cached_result["response"]
+        actual_tokens_used = 0
         cache_hit = True
     else:
-        ai_response = await generate_decision(
+        ai_result = await generate_decision(
             user_input=user_input,
             model=selected_model
         )
+        ai_response = ai_result["response"]
+        actual_tokens_used = ai_result["tokens_used"]
         DecisionCacheMiddleware.set_cached_response(
             user_input=user_input,
             model=selected_model,
@@ -67,10 +81,20 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
 
     # Best-effort token usage tracking
     try:
-        if user and payload.tokens_used > 0:
-            user.tokens_used = (user.tokens_used or 0) + payload.tokens_used
+        if user and actual_tokens_used > 0:
+            user.tokens_used = (user.tokens_used or 0) + actual_tokens_used
             db.add(user)
             db.commit()
+    except Exception:
+        pass
+
+    try:
+        record_decision_usage(user)
+    except Exception:
+        pass
+
+    try:
+        record_monthly_token_usage(user, actual_tokens_used)
     except Exception:
         pass
 
@@ -79,7 +103,10 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
         "data": {
             "decision_id": decision.id,
             "response": ai_response,
-            "cached": cache_hit
+            "cached": cache_hit,
+            "tier": get_user_tier(user),
+            "remaining_decisions_today": get_remaining_decisions(user),
+            "monthly_tokens_remaining": get_remaining_monthly_tokens(user)
         }
     }
 
