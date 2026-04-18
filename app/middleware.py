@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -78,3 +80,39 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass
 
         return await call_next(request)
+
+
+class DecisionCacheMiddleware:
+    TTL_SECONDS = 60 * 60 * 24
+    KEY_PREFIX = "decision_cache"
+
+    @classmethod
+    def build_cache_key(cls, user_input: str, model: str) -> str:
+        normalized_payload = {
+            "user_input": (user_input or "").strip(),
+            "model": model
+        }
+        serialized = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        return f"{cls.KEY_PREFIX}:{digest}"
+
+    @classmethod
+    def get_cached_response(cls, user_input: str, model: str):
+        cache_key = cls.build_cache_key(user_input=user_input, model=model)
+        cached_value = redis_client.get(cache_key)
+        if not cached_value:
+            return None
+
+        try:
+            return json.loads(cached_value)
+        except json.JSONDecodeError:
+            redis_client.delete(cache_key)
+            return None
+
+    @classmethod
+    def set_cached_response(cls, user_input: str, model: str, response_text: str):
+        cache_key = cls.build_cache_key(user_input=user_input, model=model)
+        payload = {
+            "response": response_text
+        }
+        redis_client.set(cache_key, json.dumps(payload), ex=cls.TTL_SECONDS)

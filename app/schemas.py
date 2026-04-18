@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
 class UserCreate(BaseModel):
@@ -109,3 +109,20 @@ class PaymentCheckoutRequest(BaseModel):
 
 class PaymentCheckoutResponse(BaseModel):
     checkout_url: str
+
+
+class DecisionRequest(BaseModel):
+    user_id: str
+    user_input: str = Field(..., min_length=1)
+    tokens_used: int = 0
+
+
+class DecisionResponseData(BaseModel):
+    decision_id: str
+    response: str
+    cached: bool
+
+
+class DecisionResponse(BaseModel):
+    message: str
+    data: DecisionResponseData

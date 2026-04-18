@@ -1,30 +1,62 @@
 # decision_routes.py
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from datetime import datetime
 import uuid
 
-from .decision_service import generate_decision
-from .database import get_db   # your existing DB connection
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-from .models import DecisionHistory, User  # we'll define below
+from .database import get_db
+from .decision_service import generate_decision
+from .middleware import DecisionCacheMiddleware
+from .models import DecisionHistory, User
+from .schemas import DecisionRequest, DecisionResponse
+from .subscription_service import get_model_for_user
 
 router = APIRouter(tags=["Decisions"])
 
 
-# 🧠 CREATE DECISION
-@router.post("/make")
-async def make_decision(user_input: str, user_id: str, tokens_used: int = 0, db: Session = Depends(get_db)):
-    
+@router.post("/make", response_model=DecisionResponse)
+async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
+    user_input = payload.user_input.strip()
+    user = None
+
     if not user_input:
         raise HTTPException(status_code=400, detail="Input is required")
 
-    ai_response = await generate_decision(user_input)
+    try:
+        user_id_int = int(payload.user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    user = db.query(User).filter(User.id == user_id_int).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    selected_model = get_model_for_user(user)
+    cached_result = DecisionCacheMiddleware.get_cached_response(
+        user_input=user_input,
+        model=selected_model
+    )
+
+    if cached_result:
+        ai_response = cached_result["response"]
+        cache_hit = True
+    else:
+        ai_response = await generate_decision(
+            user_input=user_input,
+            model=selected_model
+        )
+        DecisionCacheMiddleware.set_cached_response(
+            user_input=user_input,
+            model=selected_model,
+            response_text=ai_response
+        )
+        cache_hit = False
 
     decision = DecisionHistory(
         id=str(uuid.uuid4()),
-        user_id=user_id,
+        user_id=payload.user_id,
         input_text=user_input,
         ai_response=ai_response,
         created_at=datetime.utcnow()
@@ -35,10 +67,8 @@ async def make_decision(user_input: str, user_id: str, tokens_used: int = 0, db:
 
     # Best-effort token usage tracking
     try:
-        user_id_int = int(user_id)
-        user = db.query(User).filter(User.id == user_id_int).first()
-        if user and tokens_used > 0:
-            user.tokens_used = (user.tokens_used or 0) + tokens_used
+        if user and payload.tokens_used > 0:
+            user.tokens_used = (user.tokens_used or 0) + payload.tokens_used
             db.add(user)
             db.commit()
     except Exception:
@@ -48,18 +78,17 @@ async def make_decision(user_input: str, user_id: str, tokens_used: int = 0, db:
         "message": "Decision generated successfully",
         "data": {
             "decision_id": decision.id,
-            "response": ai_response
+            "response": ai_response,
+            "cached": cache_hit
         }
     }
 
 
-# 📜 GET USER HISTORY
 @router.get("/history/{user_id}")
 async def get_history(user_id: str, db: Session = Depends(get_db)):
-
-    history = db.query(DecisionHistory)\
-        .filter(DecisionHistory.user_id == user_id)\
-        .order_by(DecisionHistory.created_at.desc())\
+    history = db.query(DecisionHistory) \
+        .filter(DecisionHistory.user_id == user_id) \
+        .order_by(DecisionHistory.created_at.desc()) \
         .all()
 
     return {
@@ -68,12 +97,10 @@ async def get_history(user_id: str, db: Session = Depends(get_db)):
     }
 
 
-# 🗑️ DELETE ONE DECISION
 @router.delete("/{decision_id}")
 async def delete_decision(decision_id: str, db: Session = Depends(get_db)):
-
-    decision = db.query(DecisionHistory)\
-        .filter(DecisionHistory.id == decision_id)\
+    decision = db.query(DecisionHistory) \
+        .filter(DecisionHistory.id == decision_id) \
         .first()
 
     if not decision:
