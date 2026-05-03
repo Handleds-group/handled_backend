@@ -1,125 +1,437 @@
+import base64
+import mimetypes
 import os
-import smtplib
-from email.message import EmailMessage
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-EMAIL_FROM = os.getenv("EMAIL_FROM") or SMTP_USERNAME
-EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")  # default darker purple
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_FROM = os.getenv("RESEND_FROM")
 EMAIL_DEBUG_ENABLED = os.getenv("EMAIL_DEBUG_ENABLED", "false").lower() == "true"
-LANDING_PAGE_URL = "https://handleds.vercel.app"
+LANDING_PAGE_URL = os.getenv("LANDING_PAGE_URL", "https://handleds.vercel.app")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@handled.app")
+EMAIL_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "images", "handled-app-icon.png")
 
-BG_COLOR = "#E3D7F8"
-CARD_BG = "#F6F3F3"
-BORDER_COLOR = "#E4D7FF"
-MUTED_TEXT = "#665487"
-TEXT_COLOR = "#40315F"
+THEME = {
+    "bg_outer": "#F3EAFF",
+    "bg_card": "#FFFFFF",
+    "bg_soft": "#F7F1FF",
+    "bg_accent": "#ECDDFF",
+    "border": "#DCC8F4",
+    "primary": "#7C3AED",
+    "primary_dark": "#5B21B6",
+    "primary_soft": "#E2D0FF",
+    "success": "#15803D",
+    "success_bg": "#ECFDF3",
+    "danger": "#B42318",
+    "danger_bg": "#FEF3F2",
+    "warning": "#B54708",
+    "warning_bg": "#FFF7ED",
+    "text": "#24143F",
+    "text_soft": "#4E3A73",
+    "text_muted": "#6F5A96",
+    "badge_bg": "#E9D8FF",
+    "badge_text": "#5B21B6",
+}
 
-def _render_email_shell(title: str, subtitle: str, content_html: str, footer_note: str | None = None) -> str:
-    footer = footer_note or "If you didn't request this email, you can safely ignore it."
-    clarification_html = (
-        f'Visit our offical site <a href="{LANDING_PAGE_URL}" '
-        f'style="color:#{EMAIL_THEME_COLOR}; text-decoration:none; font-weight:600;">handleds.vercel.app</a>.'
+
+def _logo_src() -> str:
+    if not os.path.exists(EMAIL_LOGO_PATH):
+        return ""
+
+    mime_type, _ = mimetypes.guess_type(EMAIL_LOGO_PATH)
+    mime_type = mime_type or "image/png"
+    with open(EMAIL_LOGO_PATH, "rb") as logo_file:
+        encoded = base64.b64encode(logo_file.read()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _brand_logo(size: int = 64) -> str:
+    logo_src = _logo_src()
+    if not logo_src:
+        return ""
+
+    return (
+        f'<img src="{logo_src}" alt="Handled" width="{size}" height="{size}" '
+        f'style="display:block; width:{size}px; height:{size}px; border-radius:16px;" />'
     )
-    logo_src = "https://handleds.vercel.app/handled-app-icon.png"
+
+
+def _shell(preheader: str, body_html: str) -> str:
+    t = THEME
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>Handled</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <style>
+    body, table, td, a {{ -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }}
+    table, td {{ mso-table-lspace: 0pt; mso-table-rspace: 0pt; }}
+    img {{ -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; display: block; }}
+    table {{ border-collapse: collapse !important; }}
+    body {{ margin: 0 !important; padding: 0 !important; width: 100% !important; height: 100% !important; background: {t['bg_outer']}; }}
+    a {{ color: {t['primary']}; text-decoration: none; }}
+    @media only screen and (max-width: 600px) {{
+      .container {{ width: 100% !important; }}
+      .stack {{ display: block !important; width: 100% !important; }}
+      .px {{ padding-left: 20px !important; padding-right: 20px !important; }}
+      .py {{ padding-top: 24px !important; padding-bottom: 24px !important; }}
+      .hero-pad {{ padding: 28px 20px !important; }}
+      .title {{ font-size: 24px !important; line-height: 32px !important; }}
+      .body-text {{ font-size: 14px !important; line-height: 22px !important; }}
+      .small-text {{ font-size: 12px !important; line-height: 18px !important; }}
+      .otp-wrap {{ padding: 22px 16px !important; }}
+      .otp-code {{ font-size: 30px !important; letter-spacing: 6px !important; }}
+      .button {{ display: block !important; width: 100% !important; }}
+      .button a {{ display: block !important; width: 100% !important; text-align: center !important; box-sizing: border-box; }}
+      .center-sm {{ text-align: center !important; }}
+    }}
+  </style>
+</head>
+<body style="margin:0; padding:0; background:{t['bg_outer']};">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
+    {preheader}
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{t['bg_outer']};">
+    <tr>
+      <td align="center" style="padding: 24px 12px;">
+        <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
+          <tr>
+            <td align="center" style="padding: 0 0 20px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:Segoe UI, Arial, sans-serif; font-size:20px; line-height:20px; font-weight:700; color:{t['text']};">
+                    {_brand_logo(64)}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:{t['bg_card']}; border:1px solid {t['border']}; border-radius:24px; overflow:hidden; box-shadow:0 12px 28px rgba(15, 23, 42, 0.08);">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                {body_html}
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:20px 12px 0; font-family:Segoe UI, Arial, sans-serif; color:{t['text_muted']};">
+              <p style="margin:0; font-size:11px; line-height:17px;">Handled &middot; Florida, United States</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def _hero(title: str, subtitle: str, badge: str | None = None) -> str:
+    t = THEME
+    badge_html = ""
+    if badge:
+        badge_html = f"""
+          <tr>
+            <td align="center" style="padding:0 0 14px 0;">
+              <span style="display:inline-block; background:{t['badge_bg']}; color:{t['badge_text']}; border:1px solid #C7DAFE; border-radius:999px; padding:6px 12px; font-family:Segoe UI, Arial, sans-serif; font-size:11px; line-height:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">{badge}</span>
+            </td>
+          </tr>"""
+
     return f"""
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG_COLOR}; padding:24px 12px;">
       <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px; background:{CARD_BG}; border:1px solid {BORDER_COLOR}; border-radius:16px; overflow:hidden;">
+        <td class="hero-pad" style="padding:36px 40px; background:linear-gradient(180deg, #F8F2FF 0%, #EEDFFF 100%); border-bottom:1px solid {t['border']};">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {badge_html}
             <tr>
-              <td style="padding:18px 22px; background:#E9DDFF;">
-                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;">
-                  <tr>
-                    <td align="center" style="padding-bottom:10px;">
-                      <a href="{LANDING_PAGE_URL}" style="text-decoration:none;">
-                        <img src="{logo_src}" alt="Handled icon" width="96" height="96" style="display:block; width:96px; height:96px; border-radius:50%; border:3px solid #E1D2FF; background:#F6F3F3;">
-                      </a>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td align="center">
-                      <h1 style="margin:0; font-family:Arial, sans-serif; font-size:22px; color:#{EMAIL_THEME_COLOR};">Handled</h1>
-                    </td>
-                  </tr>
-                </table>
-                <p style="margin:6px 0 0; font-family:Arial, sans-serif; color:{MUTED_TEXT}; font-size:13px;">{subtitle}</p>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:22px; font-family:Arial, sans-serif; color:{TEXT_COLOR};">
-                <h2 style="margin:0 0 10px; font-size:18px; color:#{EMAIL_THEME_COLOR};">{title}</h2>
-                {content_html}
-                <p style="margin:18px 0 0; font-size:12px; color:{MUTED_TEXT};">{footer}</p>
-                <p style="margin:8px 0 0; font-size:12px; color:{MUTED_TEXT};">{clarification_html}</p>
-              </td>
-            </tr>
-          </table>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;">
-            <tr>
-              <td style="padding-top:10px; text-align:center; font-family:Arial, sans-serif; font-size:11px; color:{MUTED_TEXT};">
-                Handled &bull; Secure Messages &bull; 2026
+              <td align="center" style="font-family:Segoe UI, Arial, sans-serif; color:{t['text']};">
+                <h1 class="title" style="margin:0 0 10px; font-size:28px; line-height:36px; font-weight:700; color:{t['text']};">{title}</h1>
+                <p class="body-text" style="margin:0; font-size:15px; line-height:24px; color:{t['text_soft']};">{subtitle}</p>
               </td>
             </tr>
           </table>
         </td>
-      </tr>
-    </table>
-    """
+      </tr>"""
+
+
+def _section_label(text: str) -> str:
+    return f"""<p style="margin:0 0 14px; font-family:Segoe UI, Arial, sans-serif; font-size:11px; line-height:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:{THEME['text_muted']};">{text}</p>"""
+
+
+def _panel(inner_html: str, accent: str | None = None, bg: str | None = None) -> str:
+    t = THEME
+    border_style = f"border-left:4px solid {accent};" if accent else ""
+    panel_bg = bg or t["bg_soft"]
+    return f"""
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{panel_bg}; border:1px solid {t['border']}; border-radius:16px; {border_style}">
+        <tr>
+          <td class="px py" style="padding:20px 22px;">
+            {inner_html}
+          </td>
+        </tr>
+      </table>"""
+
+
+def _info_row(label: str, value: str, highlight: bool = False, last: bool = False) -> str:
+    t = THEME
+    border_bottom = "none" if last else f"1px solid {t['border']}"
+    value_color = t["primary"] if highlight else t["text"]
+    return f"""
+      <tr>
+        <td class="stack" style="width:42%; padding:12px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:700; color:{t['text_muted']}; text-transform:uppercase; letter-spacing:0.6px;">{label}</td>
+        <td class="stack center-sm" style="padding:12px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:20px; font-weight:600; color:{value_color}; text-align:right;">{value}</td>
+      </tr>"""
+
+
+def _bullet_item(title: str, text: str, marker: str) -> str:
+    t = THEME
+    return f"""
+      <tr>
+        <td style="padding:0 0 14px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="width:38px; vertical-align:top; padding-top:2px;">
+                <table role="presentation" width="28" cellpadding="0" cellspacing="0" border="0" style="width:28px; background:{t['primary_soft']}; border-radius:999px;">
+                  <tr>
+                    <td align="center" style="height:28px; font-family:Segoe UI, Arial, sans-serif; font-size:13px; line-height:28px; font-weight:700; color:{t['primary_dark']};">{marker}</td>
+                  </tr>
+                </table>
+              </td>
+              <td style="font-family:Segoe UI, Arial, sans-serif;">
+                <p style="margin:0 0 4px; font-size:14px; line-height:20px; font-weight:700; color:{t['text']};">{title}</p>
+                <p style="margin:0; font-size:13px; line-height:20px; color:{t['text_soft']};">{text}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>"""
+
+
+def _cta_button(label: str, url: str) -> str:
+    t = THEME
+    return f"""
+      <table role="presentation" class="button" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+        <tr>
+          <td align="center" style="border-radius:12px; background:{t['primary']};">
+            <a href="{url}" target="_blank" style="display:inline-block; padding:14px 24px; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:14px; font-weight:700; color:#FFFFFF; background:{t['primary']}; border-radius:12px;">{label}</a>
+          </td>
+        </tr>
+      </table>"""
+
+
+def _message_bar(title: str, text: str, tone: str = "info") -> str:
+    t = THEME
+    styles = {
+        "info": (t["primary"], t["bg_accent"], "#D6E4FF"),
+        "success": (t["success"], t["success_bg"], "#B7E7C1"),
+        "danger": (t["danger"], t["danger_bg"], "#F7C9C4"),
+        "warning": (t["warning"], t["warning_bg"], "#FBD1A2"),
+    }
+    color, bg, border = styles[tone]
+    return _panel(
+        f"""
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="vertical-align:top;">
+              <p style="margin:0 0 4px; font-family:Segoe UI, Arial, sans-serif; font-size:13px; line-height:20px; font-weight:700; color:{color};">{title}</p>
+              <p style="margin:0; font-family:Segoe UI, Arial, sans-serif; font-size:13px; line-height:20px; color:{THEME['text_soft']};">{text}</p>
+            </td>
+          </tr>
+        </table>
+        """,
+        accent=color,
+        bg=bg,
+    ).replace(f"border:1px solid {t['border']};", f"border:1px solid {border};")
+
 
 def otp_email_html(title: str, otp_code: str, purpose: str) -> str:
-    content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">Use the one-time code below to continue.</p>
-    <div style="text-align:center; margin:16px 0;">
-      <span style="display:inline-block; background:#EFE3FF; color:#{EMAIL_THEME_COLOR}; padding:12px 22px; border-radius:10px; font-size:24px; letter-spacing:3px; font-weight:700;">
-        {otp_code}
-      </span>
-    </div>
-    <div style="background:#F7F3FF; border:1px dashed #D8C6F7; padding:12px; border-radius:10px; font-size:12px; color:{MUTED_TEXT};">
-      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:6px;">OTP Details</div>
-      <div>Purpose: {purpose}</div>
-      <div>Length: 6 digits</div>
-      <div>Expires in: 10 minutes</div>
-      <div>One-time use only</div>
-    </div>
-    """
-    return _render_email_shell(title=title, subtitle="Your personal ADHD & decision assistant", content_html=content)
+    t = THEME
+    body = f"""
+    {_hero(title, "Use the verification code below to confirm your identity. This code is valid for 10 minutes only.", badge="Verification Code")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="background:{t['bg_accent']}; border:1px solid #CFE0FF; border-radius:20px;">
+                <tr>
+                  <td class="otp-wrap" align="center" style="padding:26px 32px;">
+                    <p style="margin:0 0 10px; font-family:Segoe UI, Arial, sans-serif; font-size:11px; line-height:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:{t['text_muted']};">Your OTP Code</p>
+                    <p class="otp-code" style="margin:0; font-family:Segoe UI, Arial, sans-serif; font-size:38px; line-height:42px; font-weight:700; letter-spacing:8px; color:{t['text']};">{otp_code}</p>
+                    <p style="margin:10px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:12px; line-height:18px; color:{t['text_muted']};">Expires in 10 minutes</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        {_panel(
+            _section_label("Code Details")
+            + f'''
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_info_row("Purpose", purpose)}
+              {_info_row("Length", "6 digits")}
+              {_info_row("Expires", "10 minutes")}
+              {_info_row("Usage", "One-time only", last=True)}
+            </table>
+            '''
+        )}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_message_bar("Security notice", "Never share this code with anyone. Handled staff will never ask for your OTP. If you did not request it, secure your account immediately.", tone="danger")}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>"""
+    return _shell(f"Your OTP: {otp_code} expires in 10 minutes", body)
+
 
 def welcome_email_html(username: str) -> str:
-    content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">Welcome {username}! We're happy you're here.</p>
-    <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
-      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:6px;">Getting started</div>
-      <div>&bull; Verify your email</div>
-      <div>&bull; Complete your profile</div>
-      <div>&bull; Explore decisions and history</div>
-    </div>
-    """
-    return _render_email_shell(title="Welcome to Handled", subtitle="Let's get you set up", content_html=content)
+    features = [
+        ("Fast decisions", "Get clear guidance quickly whenever you are stuck between options.", "1"),
+        ("Calm support", "Use the in-app calming experience before making an important choice.", "2"),
+        ("Decision history", "Review past choices and patterns whenever you want to reflect.", "3"),
+        ("Helpful reminders", "Stay on track with thoughtful notifications that are not overwhelming.", "4"),
+    ]
 
-def login_alert_email_html(login_time_utc: str) -> str:
-    content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">We detected a login to your account.</p>
-    <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
-      <div>Time (UTC): {login_time_utc}</div>
-      <div>If this wasn't you, change your password immediately.</div>
-    </div>
-    """
-    return _render_email_shell(title="New login detected", subtitle="Security notice", content_html=content)
+    feature_rows = "".join(_bullet_item(title, text, marker) for title, text, marker in features)
+    getting_started = [
+        ("Open the app", "Your dashboard is ready and waiting for you.", "1"),
+        ("Describe your situation", "Use Handle for me to get an informed suggestion.", "2"),
+        ("Keep your progress", "Your activity is saved so you can revisit decisions later.", "3"),
+    ]
+    getting_started_rows = "".join(_bullet_item(title, text, marker) for title, text, marker in getting_started)
 
-def account_deleted_email_html() -> str:
-    content = """
-    <p style="margin:0 0 12px; font-size:14px;">Your Handled account has been deleted.</p>
-    <div style="background:#F7F3FF; border:1px solid #E4D7FF; padding:12px; border-radius:10px; font-size:13px; color:#6B5A8A;">
-      <div>If this was not you, contact support right away.</div>
-    </div>
-    """
-    return _render_email_shell(title="Account deleted", subtitle="We're sorry to see you go", content_html=content)
+    body = f"""
+    {_hero(f"Welcome to Handled, {username}", "Your account is ready. Handled is here to help you make decisions with more clarity and less stress.", badge="Account Verified")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        <p class="body-text" style="margin:0 0 24px; font-family:Segoe UI, Arial, sans-serif; font-size:15px; line-height:24px; color:{THEME['text_soft']};">
+          We are glad to have you here. Handled was built for moments when too many choices make it hard to move forward.
+          Whether it is a daily decision or something more important, your account is ready to support you.
+        </p>
+
+        {_panel(_section_label("What You Can Do") + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{feature_rows}</table>')}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(_section_label("Get Started") + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{getting_started_rows}</table>')}
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">
+          <tr>
+            <td align="center">
+              {_cta_button("Open Handled", LANDING_PAGE_URL)}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>"""
+
+    return _shell(f"Welcome, {username}. Your Handled account is ready.", body)
+
+
+def login_alert_email_html(login_time_utc: str, device: str = "Unknown device", location: str = "Unknown location", ip: str = None) -> str:
+    session_rows = [
+        _info_row("Time (UTC)", login_time_utc),
+        _info_row("Device", device, last=not ip),
+    ]
+    if ip:
+        session_rows.append(_info_row("IP Address", ip, last=True))
+    body = f"""
+    {_hero("New Login Detected", "We noticed a successful sign-in to your Handled account.", badge="Security")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_message_bar("Quick check", "If this was you, no action is needed. If it was not you, change your password immediately.", tone="info")}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("Login Details")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {"".join(session_rows)}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>"""
+
+    return _shell("A new login to your Handled account was recorded", body)
+
+
+def payment_success_email_html(plan: str) -> str:
+    plan_label = plan.capitalize()
+    perks = {
+        "pro": [
+            ("Unlimited decisions", "Ask for guidance whenever you need it.", "1"),
+            ("Full decision history", "Review your choices over time.", "2"),
+            ("Priority notifications", "Receive the most important reminders first.", "3"),
+            ("Advanced suggestions", "Get stronger support from the product.", "4"),
+        ],
+        "premium": [
+            ("Everything in Pro", "Your account includes the full Pro experience.", "1"),
+            ("Advanced AI access", "Use the most capable experience available in your plan.", "2"),
+            ("Exclusive customization", "Enjoy additional premium product options.", "3"),
+            ("Priority support", "Get faster help when you need it.", "4"),
+        ],
+        "free": [
+            ("10 decisions per day", "A simple starting point for everyday choices.", "1"),
+            ("Basic decision history", "Keep a light record of your activity.", "2"),
+            ("Standard notifications", "Receive the essentials.", "3"),
+            ("Mobile access", "Use Handled from your phone whenever you need it.", "4"),
+        ],
+    }
+    perk_rows = "".join(_bullet_item(title, text, marker) for title, text, marker in perks.get(plan.lower(), perks["pro"]))
+
+    body = f"""
+    {_hero(f"Your {plan_label} plan is now active", "Your payment was successful and the new access level is available on your account right away.", badge=f"{plan_label} Active")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_message_bar("Payment confirmed", f"Your {plan_label} features are now unlocked and ready to use.", tone="success")}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(_section_label(f"{plan_label} Benefits") + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{perk_rows}</table>')}
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">
+          <tr>
+            <td align="center">
+              {_cta_button("Open Handled", LANDING_PAGE_URL)}
+            </td>
+          </tr>
+        </table>
+
+        <p class="small-text" style="margin:14px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:12px; line-height:18px; color:{THEME['text_muted']}; text-align:center;">A receipt has been sent separately for your records.</p>
+      </td>
+    </tr>"""
+
+    return _shell(f"Payment confirmed for your {plan_label} plan.", body)
+
 
 def _format_currency(amount: int | None, currency: str | None) -> str:
     if amount is None or currency is None:
@@ -128,21 +440,6 @@ def _format_currency(amount: int | None, currency: str | None) -> str:
         return f"{amount / 100:,.2f} {currency.upper()}"
     except Exception:
         return f"{amount} {currency.upper() if currency else ''}"
-
-
-def payment_success_email_html(plan: str) -> str:
-    plan_label = plan.capitalize()
-    content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">Your payment was successful.</p>
-    <div style="background:#F7F3FF; border:1px dashed #D8C6F7; padding:12px; border-radius:10px; font-size:13px; color:{MUTED_TEXT};">
-      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:6px;">Payment summary</div>
-      <div><strong>Plan:</strong> {plan_label}</div>
-      <div><strong>Status:</strong> Active</div>
-      <div><strong>Access:</strong> Premium features enabled</div>
-      <div style="margin-top:8px;">Thanks for supporting Handled.</div>
-    </div>
-    """
-    return _render_email_shell(title="Payment Successful", subtitle="Subscription activated", content_html=content)
 
 
 def payment_receipt_email_html(
@@ -155,91 +452,140 @@ def payment_receipt_email_html(
     purchased_at: str | None = None,
     billing_reason: str | None = None,
 ) -> str:
-    plan_label = plan.capitalize() if plan else "Handled subscription"
+    t = THEME
+    plan_label = plan.capitalize() if plan else "Handled Subscription"
     amount_text = _format_currency(amount, currency)
     purchased_at_text = purchased_at or "Just now"
     payment_method_text = payment_method or "Card"
-    billing_reason_html = f"<div><strong>Billing reason:</strong> {billing_reason}</div>" if billing_reason else ""
+    status_text = status.capitalize() if status else "Completed"
+    date_row = _info_row("Date", purchased_at_text, last=not billing_reason)
+    billing_row = _info_row("Billing Reason", billing_reason, last=True) if billing_reason else ""
+    status_tone = "success" if status_text.lower() in ("paid", "succeeded", "completed") else "warning"
 
-    content = f"""
-    <p style="margin:0 0 12px; font-size:14px;">Thank you for your payment. This is your official receipt.</p>
-    <div style="background:#F7F3FF; border:1px solid {BORDER_COLOR}; padding:14px; border-radius:12px; font-size:13px; color:{MUTED_TEXT};">
-      <div style="font-weight:700; color:#{EMAIL_THEME_COLOR}; margin-bottom:12px;">Receipt details</div>
-      <div style="margin-bottom:10px;">
-        <div><strong>Plan:</strong> {plan_label}</div>
-        <div><strong>Amount paid:</strong> {amount_text}</div>
-        <div><strong>Currency:</strong> {currency.upper() if currency else 'N/A'}</div>
-        <div><strong>Status:</strong> {status.capitalize()}</div>
-        <div><strong>Reference:</strong> {reference or 'N/A'}</div>
-        <div><strong>Payment method:</strong> {payment_method_text}</div>
-        <div><strong>Date:</strong> {purchased_at_text}</div>
-        {billing_reason_html}
-      </div>
-    </div>
-    <div style="background:#FFFFFF; border:1px solid #D7D0F3; border-radius:12px; padding:16px; font-size:13px; color:{TEXT_COLOR}; margin-top:14px;">
-      <h3 style="margin:0 0 8px; font-size:15px; color:#{EMAIL_THEME_COLOR};">Receipt summary</h3>
-      <ul style="margin:0 0 0 16px; padding:0; color:{MUTED_TEXT};">
-        <li>Subscription plan activated</li>
-        <li>Premium access enabled</li>
-        <li>Reference saved for your records</li>
-      </ul>
-    </div>
-    <div style="margin-top:14px; font-size:13px; color:{MUTED_TEXT};">
-      <p style="margin:0 0 8px;">If you have questions, reply to this message or visit our website.</p>
-      <p style="margin:0;">Handled is here to help you stay focused and on track.</p>
-    </div>
-    """
-    return _render_email_shell(title="Payment Receipt", subtitle="Your purchase details", content_html=content, footer_note="This email is your official receipt for your Handled payment.")
+    body = f"""
+    {_hero("Payment Receipt", "Here is your receipt for the payment made on your Handled account. Please keep it for your records.", badge="Official Receipt")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_message_bar("Transaction summary", f"Total charged: {amount_text}. Status: {status_text}.", tone=status_tone)}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("Transaction Details")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {_info_row("Plan", plan_label, highlight=True)}
+                    {_info_row("Amount", amount_text)}
+                    {_info_row("Currency", currency.upper() if currency else "N/A")}
+                    {_info_row("Status", status_text)}
+                    {_info_row("Reference", reference or "N/A")}
+                    {_info_row("Payment Method", payment_method_text)}
+                    {date_row}
+                    {billing_row}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("Included With This Payment")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {_bullet_item(plan_label, "Your selected subscription is active on your account.", "1")}
+                    {_bullet_item("Saved reference", "The payment reference above can be used for support requests.", "2")}
+                    {_bullet_item("Account access", "Features included in your plan are available based on your current subscription.", "3")}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>"""
+
+    return _shell(f"Receipt for {amount_text} on your {plan_label} plan. Ref: {reference or 'N/A'}", body)
+
+
+def account_deleted_email_html() -> str:
+    body = f"""
+    {_hero("Your account has been deleted", "Your Handled account and associated data have been permanently removed.", badge="Account Closed")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_message_bar("Was this not you?", f"If you did not request this deletion, contact support immediately at {SUPPORT_EMAIL}.", tone="danger")}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("What Was Removed")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {_bullet_item("Account access", "Your login credentials and account access were removed.", "1")}
+                    {_bullet_item("Decision history", "Saved decisions and related history were removed.", "2")}
+                    {_bullet_item("Profile data", "Your profile information and preferences were removed.", "3")}
+                    {_bullet_item("Subscription billing", "No further charges will be made for an active subscription.", "4")}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+        <p class="body-text" style="margin:20px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; text-align:center; color:{THEME['text_soft']};">
+          If you want to use Handled again in the future, you can create a new account at
+          <a href="{LANDING_PAGE_URL}" style="color:{THEME['primary']}; font-weight:700;">handleds.vercel.app</a>.
+        </p>
+      </td>
+    </tr>"""
+
+    return _shell("Your Handled account has been permanently deleted", body)
 
 
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
-    """
-    Sends an HTML email using SMTP.
-    Returns (success, error_message).
-    """
-    if not SMTP_SERVER:
-        return False, "missing SMTP_SERVER in environment"
-    if not SMTP_PORT:
-        return False, "missing SMTP_PORT in environment"
-    if not EMAIL_FROM:
-        return False, "missing EMAIL_FROM or SMTP_USERNAME in environment"
-    if not SMTP_USERNAME or not SMTP_PASSWORD:
-        return False, "missing SMTP_USERNAME or SMTP_PASSWORD in environment"
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_FROM
-    msg["To"] = email_to
-    msg.set_content("Please view this email in an HTML capable client.")
-    msg.add_alternative(body, subtype="html")
+    if not RESEND_API_KEY:
+        return False, "missing RESEND_API_KEY in environment"
+    if not RESEND_FROM:
+        return False, "missing RESEND_FROM in environment"
 
     try:
         if EMAIL_DEBUG_ENABLED:
-            print(f"Sending email via SMTP to {email_to} using {SMTP_SERVER}:{SMTP_PORT}")
+            print(f"[Handled Email] Sending to {email_to} via Resend")
 
-        if SMTP_PORT == 465:
-            smtp_client = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=20)
-        else:
-            smtp_client = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20)
-
-        with smtp_client as smtp:
-            smtp.ehlo()
-            if SMTP_PORT != 465:
-                smtp.starttls()
-                smtp.ehlo()
-            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(msg)
-
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": RESEND_FROM,
+                "to": [email_to],
+                "subject": subject,
+                "html": body,
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
         return True, None
     except Exception as exc:
-        return False, str(exc)
+        try:
+            error_body = response.text
+        except Exception:
+            error_body = None
+        if error_body:
+            return False, f"Resend send failed: {exc} | response: {error_body}"
+        return False, f"Resend send failed: {exc}"
+
 
 def send_email(subject: str, email_to: str, body: str) -> bool:
-    """
-    Sends an HTML email using SMTP.
-    Returns True on success, False on failure.
-    """
     success, error = send_email_with_error(subject, email_to, body)
     if not success:
-        print("Error sending email via SMTP:", error)
+        print(f"[Handled Email Error] {error}")
     return success

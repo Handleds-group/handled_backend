@@ -18,7 +18,15 @@ engine = create_engine(
     echo=True,
     future=True,
     pool_pre_ping=True,
-    connect_args={"connect_timeout": 20},
+    pool_reset_on_return=None,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,  # Recycle connections after 1 hour to prevent idle timeout
+    pool_timeout=30,
+    connect_args={
+        "connect_timeout": 20,
+        "options": "-c statement_timeout=300000",  # 5 minute statement timeout
+    },
 )
 SessionLocal = sessionmaker(
     bind=engine,
@@ -33,12 +41,36 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            if db.in_transaction():
+                try:
+                    db.rollback()
+                except Exception as rollback_error:
+                    rollback_message = str(rollback_error).lower()
+                    if any(
+                        marker in rollback_message
+                        for marker in ("idle transaction timeout", "connection closed", "ssl syscall error", "eof detected")
+                    ):
+                        db.invalidate()
+                    else:
+                        raise
+            db.close()
+        except Exception as e:
+            # Cleanup errors during request teardown should not turn a completed response
+            # into a server error, especially when a background task delays session close.
+            message = str(e).lower()
+            if any(
+                marker in message
+                for marker in ("idle transaction timeout", "connection closed", "ssl syscall error", "eof detected")
+            ):
+                db.invalidate()
+                print(f"[DB Cleanup Warning] {e}")
+                return
+            raise
 
 def init_db():
     # Import here to avoid circular imports at module load time.
     from app.models import Base
-
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
 

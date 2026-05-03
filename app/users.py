@@ -1,18 +1,46 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
 from app.database import get_db
-from app.models import User
-from app.schemas import UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
+from app.models import BugReport, DecisionHistory, Notification, OTP, PaymentTransaction, User
+from app.schemas import DeleteAccountRequest, UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
 from app.dependencies import get_current_user
 from app.email_utils import send_email, account_deleted_email_html
 from app.pagination import paginate
+from app.stripe_service import cancel_subscription
 
 router = APIRouter()
 
+
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _delete_user_account(db: Session, user: User) -> str:
+    email_to = user.email
+    subscription_id = user.subscription_id
+    user_id = user.id
+
+    if subscription_id:
+        try:
+            cancel_subscription(subscription_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to cancel the active subscription right now. Please try again."
+            ) from exc
+
+    db.execute(delete(Notification).where(Notification.user_id == user_id))
+    db.execute(update(BugReport).where(BugReport.user_id == user_id).values(user_id=None))
+    db.execute(update(PaymentTransaction).where(PaymentTransaction.user_id == user_id).values(user_id=None))
+    db.execute(delete(OTP).where(OTP.user_id == user_id))
+    db.execute(delete(DecisionHistory).where(DecisionHistory.user_id == str(user_id)))
+    db.delete(user)
+    db.commit()
+
+    return email_to
+
 
 @router.get("/", response_model=list[UserOut])
 def get_all_users(pagination: dict = Depends(paginate), db: Session = Depends(get_db)):
@@ -21,14 +49,15 @@ def get_all_users(pagination: dict = Depends(paginate), db: Session = Depends(ge
     users = result.scalars().all()
     return users
 
+
 @router.get("/profile/{user_id}", response_model=UserProfileOut)
 def get_profile_by_id(user_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # Require auth, but allow fetching any user's editable fields by id
     result = db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
 
 @router.put("/me", response_model=UserProfileOut)
 def update_my_profile(
@@ -55,6 +84,7 @@ def update_my_profile(
     db.refresh(current_user)
     return current_user
 
+
 @router.put("/me/password")
 def change_password(
     payload: ChangePassword,
@@ -71,15 +101,18 @@ def change_password(
     db.commit()
     return {"message": "Password updated successfully"}
 
-@router.delete("/me")
-def delete_my_account(
+
+@router.post("/delete-account")
+def delete_user_account_with_authorization(
+    payload: DeleteAccountRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    email_to = current_user.email
-    db.delete(current_user)
-    db.commit()
+    if current_user.id != payload.user_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    email_to = _delete_user_account(db, current_user)
     background_tasks.add_task(
         send_email,
         subject="Your Handled account was deleted",
@@ -87,6 +120,7 @@ def delete_my_account(
         body=account_deleted_email_html()
     )
     return {"message": "Account deleted successfully"}
+
 
 @router.get("/{user_id}", response_model=UserOut)
 def get_user(user_id: int, db: Session = Depends(get_db)):
@@ -96,9 +130,9 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+
 @router.put("/{user_id}", response_model=UserOut)
 def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # Basic example: allow only self updates here
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -110,3 +144,23 @@ def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db), c
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.delete("/{user_id}")
+def delete_user_account_by_id(
+    user_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    email_to = _delete_user_account(db, current_user)
+    background_tasks.add_task(
+        send_email,
+        subject="Your Handled account was deleted",
+        email_to=email_to,
+        body=account_deleted_email_html()
+    )
+    return {"message": "Account deleted successfully"}

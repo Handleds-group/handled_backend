@@ -1,5 +1,7 @@
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
+
 
 class UserCreate(BaseModel):
     username: str
@@ -10,6 +12,7 @@ class UserCreate(BaseModel):
     description: Optional[str]
     allergic: Optional[str]
     password: str
+
 
 class SignupRequest(BaseModel):
     username: str
@@ -22,9 +25,11 @@ class SignupRequest(BaseModel):
     password: str
     confirm_password: str
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class UserUpdate(BaseModel):
     username: Optional[str]
@@ -34,20 +39,24 @@ class UserUpdate(BaseModel):
     description: Optional[str]
     allergic: Optional[str]
 
+
 class UserProfileUpdate(BaseModel):
     username: Optional[str]
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
 
+
 class UserProfileOut(BaseModel):
     username: Optional[str]
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
+    created_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
 
 class UserOut(BaseModel):
     id: int
@@ -60,25 +69,35 @@ class UserOut(BaseModel):
     allergic: Optional[str]
     is_verified: bool
     is_premium: Optional[bool] = None
+    created_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
 
 class TokenSchema(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+
 class OTPRequest(BaseModel):
     email: EmailStr
+
 
 class ChangePassword(BaseModel):
     old_password: str
     new_password: str
     confirm_password: str
+
+
+class DeleteAccountRequest(BaseModel):
+    user_id: int
+
 
 class BugReportCreate(BaseModel):
     name: Optional[str] = None
@@ -93,6 +112,7 @@ class BugReportCreate(BaseModel):
         user_id = int(value)
         return user_id if user_id > 0 else None
 
+
 class BugReportOut(BaseModel):
     id: int
     name: Optional[str] = None
@@ -102,10 +122,12 @@ class BugReportOut(BaseModel):
     class Config:
         from_attributes = True
 
+
 class PaymentCheckoutRequest(BaseModel):
     user_id: str
     plan: str
-    email: str
+    email: Optional[EmailStr] = None
+
 
 class PaymentCheckoutResponse(BaseModel):
     checkout_url: str

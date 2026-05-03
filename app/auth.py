@@ -1,5 +1,5 @@
 # app/auth.py
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -10,7 +10,9 @@ from app.email_utils import send_email, otp_email_html, welcome_email_html, logi
 from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
 from jose import ExpiredSignatureError, JWTError
+import ipaddress
 import random, string, datetime
+import requests
 from app.redis_client import redis_client
 
 router = APIRouter()
@@ -37,6 +39,65 @@ def delete_otp_from_redis(email: str, otp_code: str):
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    for header in ("cf-connecting-ip", "x-real-ip"):
+        value = request.headers.get(header)
+        if value:
+            return value.strip()
+    return request.client.host if request.client else "Unknown IP"
+
+
+def describe_device(user_agent: str | None) -> str:
+    if not user_agent:
+        return "Unknown device"
+
+    ua = user_agent.lower()
+
+    if "iphone" in ua:
+        device = "iPhone"
+    elif "ipad" in ua:
+        device = "iPad"
+    elif "android" in ua:
+        device = "Android device"
+    elif "windows" in ua:
+        device = "Windows PC"
+    elif "mac os x" in ua or "macintosh" in ua:
+        device = "Mac"
+    elif "linux" in ua:
+        device = "Linux device"
+    else:
+        device = "Unknown device"
+
+    return device
+
+
+def describe_location(ip_address: str) -> str:
+    try:
+        ip_obj = ipaddress.ip_address(ip_address)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved:
+            return "Local or private network"
+    except ValueError:
+        return "Unknown location"
+
+    try:
+        response = requests.get(f"https://ipwho.is/{ip_address}", timeout=3)
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success", True):
+            return "Unknown location"
+
+        city = payload.get("city")
+        region = payload.get("region")
+        country = payload.get("country")
+        parts = [part for part in (city, region, country) if part]
+        return ", ".join(parts) if parts else "Unknown location"
+    except Exception:
+        return "Unknown location"
 
 # --------------------------
 # Signup
@@ -94,7 +155,7 @@ def signup(
 # --------------------------
 
 @router.post("/login", response_model=TokenSchema)
-def login(user: UserLogin, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def login(user: UserLogin, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     email = normalize_email(user.email)
     result = db.execute(select(User).where(User.email == email))
     db_user = result.scalars().first()
@@ -103,11 +164,17 @@ def login(user: UserLogin, background_tasks: BackgroundTasks, db: Session = Depe
 
     # Send login warning email
     login_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    client_ip = get_client_ip(request)
+    device = describe_device(request.headers.get("user-agent"))
     background_tasks.add_task(
         send_email,
         subject="New login detected",
         email_to=email,
-        body=login_alert_email_html(login_time_utc=login_time)
+        body=login_alert_email_html(
+            login_time_utc=login_time,
+            device=device,
+            ip=client_ip,
+        )
     )
 
     return {
