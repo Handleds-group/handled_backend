@@ -9,7 +9,7 @@ import stripe
 
 from app.database import SessionLocal
 from app.models import User, PaymentTransaction
-from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse
+from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse, PaymentSessionVerifyResponse
 from app.stripe_service import create_checkout_session
 from app.email_utils import payment_receipt_email_html, payment_success_email_html, send_email_with_error
 
@@ -20,6 +20,8 @@ if not STRIPE_WEBHOOK_SECRET:
     raise RuntimeError("STRIPE_WEBHOOK_SECRET is not set in environment")
 
 router = APIRouter()
+
+PUBLIC_BACKEND_URL = os.getenv("PUBLIC_BACKEND_URL")
 
 
 def _get_user_by_id(db: Session, user_id: str) -> Optional[User]:
@@ -37,6 +39,23 @@ def _clear_subscription(db: Session, user: User):
     user.subscription_id = None
     db.add(user)
     db.commit()
+
+
+def _build_absolute_url(request: Request, path: str) -> str:
+    if PUBLIC_BACKEND_URL:
+        return f"{PUBLIC_BACKEND_URL.rstrip('/')}{path}"
+
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_proto and forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}{path}"
+
+    host = request.headers.get("host") or ""
+    if host and "localhost" not in host and "127.0.0.1" not in host:
+        return f"{request.url.scheme}://{host}{path}"
+
+    base = request.base_url
+    return f"{str(base).rstrip('/')}{path}"
 
 
 def _normalize_email(email: Optional[str]) -> Optional[str]:
@@ -125,6 +144,65 @@ def _record_transaction(
     db.commit()
 
 
+def _process_checkout_completion(
+    *,
+    db: Session,
+    session_object: dict,
+):
+    metadata = session_object.get("metadata", {})
+    user_id = metadata.get("user_id")
+    plan = metadata.get("plan")
+    subscription_id = session_object.get("subscription")
+    customer_details = session_object.get("customer_details") or {}
+    customer_email = session_object.get("customer_email") or customer_details.get("email")
+    amount = session_object.get("amount_total")
+    currency = session_object.get("currency")
+    reference = session_object.get("id")
+    status = session_object.get("payment_status") or "completed"
+    created_ts = session_object.get("created")
+    purchased_at = None
+    if created_ts:
+        purchased_at = datetime.datetime.utcfromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    logger.info(
+        "Processing checkout completion for user_id=%s plan=%s subscription_id=%s reference=%s",
+        user_id,
+        plan,
+        subscription_id,
+        reference,
+    )
+
+    if user_id and plan:
+        _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
+
+    _record_transaction(
+        db=db,
+        user_id=user_id,
+        plan=plan,
+        amount=amount,
+        currency=currency,
+        status=status,
+        reference=reference,
+    )
+    _send_payment_success_email(
+        db=db,
+        user_id=user_id,
+        fallback_email=customer_email,
+        plan=plan,
+    )
+    _send_payment_receipt(
+        db=db,
+        user_id=user_id,
+        fallback_email=customer_email,
+        plan=plan,
+        amount=amount,
+        currency=currency,
+        status=status,
+        reference=reference,
+        purchased_at=purchased_at,
+    )
+
+
 def _send_payment_receipt(
     *,
     db: Session,
@@ -196,7 +274,7 @@ def _send_payment_success_email(
 
 
 @router.post("/create-checkout", response_model=PaymentCheckoutResponse)
-def create_checkout(payload: PaymentCheckoutRequest):
+def create_checkout(payload: PaymentCheckoutRequest, request: Request):
     db = SessionLocal()
     try:
         user = _get_user_by_id(db, payload.user_id)
@@ -215,11 +293,15 @@ def create_checkout(payload: PaymentCheckoutRequest):
         checkout_email = _normalize_email(user.email) or _normalize_email(payload.email)
         if not checkout_email:
             raise HTTPException(status_code=400, detail="A valid email is required to start checkout.")
+        success_url = _build_absolute_url(request, "/success") + "?session_id={CHECKOUT_SESSION_ID}"
+        cancel_url = _build_absolute_url(request, "/cancel")
 
         checkout_url = create_checkout_session(
             user_id=payload.user_id,
             plan=payload.plan,
             email=checkout_email,
+            success_url=success_url,
+            cancel_url=cancel_url,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -228,6 +310,41 @@ def create_checkout(payload: PaymentCheckoutRequest):
     finally:
         db.close()
     return PaymentCheckoutResponse(checkout_url=checkout_url)
+
+
+@router.get("/verify-session", response_model=PaymentSessionVerifyResponse)
+def verify_checkout_session(session_id: str):
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    db = SessionLocal()
+    try:
+        session_object = stripe.checkout.Session.retrieve(session_id)
+        if not session_object:
+            raise HTTPException(status_code=404, detail="Checkout session not found")
+
+        payment_status = session_object.get("payment_status")
+        if payment_status not in {"paid", "no_payment_required"}:
+            return PaymentSessionVerifyResponse(
+                status="pending",
+                payment_status=payment_status,
+                reference=session_object.get("id"),
+                plan=(session_object.get("metadata") or {}).get("plan"),
+                subscription_id=session_object.get("subscription"),
+            )
+
+        _process_checkout_completion(db=db, session_object=session_object)
+        return PaymentSessionVerifyResponse(
+            status="completed",
+            payment_status=payment_status,
+            reference=session_object.get("id"),
+            plan=(session_object.get("metadata") or {}).get("plan"),
+            subscription_id=session_object.get("subscription"),
+        )
+    except stripe.error.StripeError as exc:
+        raise HTTPException(status_code=502, detail=f"Stripe verify failed: {exc.user_message or str(exc)}") from exc
+    finally:
+        db.close()
 
 
 @router.post("/webhook")
@@ -255,40 +372,7 @@ async def stripe_webhook(request: Request):
     db = SessionLocal()
     try:
         if event_type == "checkout.session.completed":
-            metadata = data_object.get("metadata", {})
-            user_id = metadata.get("user_id")
-            plan = metadata.get("plan")
-            subscription_id = data_object.get("subscription")
-            customer_details = data_object.get("customer_details") or {}
-            customer_email = data_object.get("customer_email") or customer_details.get("email")
-            logger.info(
-                "Processing checkout.session.completed for user_id=%s plan=%s subscription_id=%s",
-                user_id,
-                plan,
-                subscription_id,
-            )
-            if user_id and plan:
-                _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
-            amount = data_object.get("amount_total")
-            currency = data_object.get("currency")
-            reference = data_object.get("id")
-            status = data_object.get("payment_status") or "completed"
-
-            _record_transaction(
-                db=db,
-                user_id=user_id,
-                plan=plan,
-                amount=amount,
-                currency=currency,
-                status=status,
-                reference=reference,
-            )
-            _send_payment_success_email(
-                db=db,
-                user_id=user_id,
-                fallback_email=customer_email,
-                plan=plan,
-            )
+            _process_checkout_completion(db=db, session_object=data_object)
 
         elif event_type == "invoice.payment_succeeded":
             subscription_id = data_object.get("subscription")

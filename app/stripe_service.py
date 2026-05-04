@@ -10,8 +10,6 @@ if not STRIPE_SECRET_KEY:
 
 STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL")
 STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL")
-if not STRIPE_SUCCESS_URL or not STRIPE_CANCEL_URL:
-    raise RuntimeError("STRIPE_SUCCESS_URL or STRIPE_CANCEL_URL is not set in environment")
 
 PRICE_IDS = {
     "pro": "price_1TFHRhJlP5JNMWILrC1RwRpt",
@@ -20,20 +18,30 @@ PRICE_IDS = {
 
 stripe.api_key = STRIPE_SECRET_KEY
 
-def create_checkout_session(user_id: str, plan: str, email: str) -> str:
+def create_checkout_session(
+    user_id: str,
+    plan: str,
+    email: str,
+    success_url: str | None = None,
+    cancel_url: str | None = None,
+) -> str:
     plan_key = plan.strip().lower()
     if plan_key not in PRICE_IDS:
         raise ValueError("Invalid plan. Use 'pro' or 'premium'.")
     email_value = (email or "").strip().lower()
     if not email_value:
         raise ValueError("A valid email is required for checkout.")
+    resolved_success_url = success_url or STRIPE_SUCCESS_URL
+    resolved_cancel_url = cancel_url or STRIPE_CANCEL_URL
+    if not resolved_success_url or not resolved_cancel_url:
+        raise ValueError("Stripe success and cancel URLs are not configured.")
 
     session = stripe.checkout.Session.create(
         mode="subscription",
         line_items=[{"price": PRICE_IDS[plan_key], "quantity": 1}],
         customer_email=email_value,
-        success_url=STRIPE_SUCCESS_URL,
-        cancel_url=STRIPE_CANCEL_URL,
+        success_url=resolved_success_url,
+        cancel_url=resolved_cancel_url,
         metadata={
             "user_id": str(user_id),
             "plan": plan_key,

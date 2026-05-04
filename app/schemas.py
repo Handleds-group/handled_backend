@@ -133,6 +133,14 @@ class PaymentCheckoutResponse(BaseModel):
     checkout_url: str
 
 
+class PaymentSessionVerifyResponse(BaseModel):
+    status: str
+    payment_status: Optional[str] = None
+    reference: Optional[str] = None
+    plan: Optional[str] = None
+    subscription_id: Optional[str] = None
+
+
 class DecisionRequest(BaseModel):
     user_id: str
     user_input: str = Field(..., min_length=1)
