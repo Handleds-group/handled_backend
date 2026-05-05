@@ -187,11 +187,9 @@ def _info_row(label: str, value: str, highlight: bool = False, last: bool = Fals
     value_color = t["primary"] if highlight else t["text"]
     return f"""
       <tr>
-        <td class="stack" style="width:42%; padding:12px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:700; color:{t['text_muted']}; text-transform:uppercase; letter-spacing:0.6px;">{label}</td>
-        <td class="stack center-sm" style="padding:12px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:20px; font-weight:600; color:{value_color}; text-align:right;">{value}</td>
+        <td class="stack" style="width:42%; padding:11px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:12px; line-height:18px; font-weight:700; color:{t['text_muted']}; text-transform:uppercase; letter-spacing:0.6px;">{label}</td>
+        <td class="stack center-sm" style="padding:11px 0; border-bottom:{border_bottom}; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:20px; font-weight:600; color:{value_color}; text-align:right;">{value}</td>
       </tr>"""
-
-
 def _bullet_item(title: str, text: str, marker: str) -> str:
     t = THEME
     return f"""
