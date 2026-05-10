@@ -61,6 +61,17 @@ class NotificationCreate(BaseModel):
     title: str
     message: str
 
+class BroadcastNotificationCreate(BaseModel):
+    title: str
+    message: str
+    send_email: bool = True
+
+class BroadcastNotificationResponse(BaseModel):
+    success: bool
+    message: str
+    recipients_count: int
+    failed_count: int
+
 class NotificationOut(BaseModel):
     id: int
     user_id: int

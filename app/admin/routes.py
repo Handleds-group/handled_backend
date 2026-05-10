@@ -26,11 +26,14 @@ from app.admin.schemas import (
     PaymentTransactionOut,
     NotificationCreate,
     NotificationOut,
+    BroadcastNotificationCreate,
+    BroadcastNotificationResponse,
     PaymentSummaryByCurrency,
     WalletOut,
     WithdrawalCreate,
     WithdrawalOut,
 )
+from app.email_utils import send_email
 from app.tokens import create_access_token
 
 router = APIRouter()
@@ -240,3 +243,36 @@ def admin_send_notification(payload: NotificationCreate, db: Session = Depends(g
     db.commit()
     db.refresh(note)
     return note
+
+
+# Broadcast notification to all users and send email
+@router.post("/notifications/broadcast", response_model=BroadcastNotificationResponse, dependencies=[Depends(require_admin)])
+def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Session = Depends(get_db)):
+    users = db.execute(select(User)).scalars().all()
+    recipients_count = 0
+    failed_count = 0
+    for user in users:
+        # Create notification in DB
+        note = Notification(
+            user_id=user.id,
+            title=payload.title,
+            message=payload.message,
+        )
+        db.add(note)
+        recipients_count += 1
+        # Send email if enabled and user has email
+        if payload.send_email and user.email:
+            subject = payload.title
+            body = payload.message
+            try:
+                if not send_email(subject, user.email, body):
+                    failed_count += 1
+            except Exception:
+                failed_count += 1
+    db.commit()
+    return BroadcastNotificationResponse(
+        success=True,
+        message="Notification sent to all users.",
+        recipients_count=recipients_count,
+        failed_count=failed_count,
+    )
