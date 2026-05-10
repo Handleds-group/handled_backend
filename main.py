@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from app.auth import router as auth_router
 from app.users import router as users_router
 from app.health import router as health_router
@@ -14,6 +15,14 @@ from app.admin.routes import router as admin_router
 from app.notifications import router as notifications_router
 
 app = FastAPI(title="Handled Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --------------------------
 # Middleware
