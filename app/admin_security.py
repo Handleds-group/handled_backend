@@ -30,37 +30,34 @@ class AdminSecurityManager:
         if not client_ip:
             return False
         try:
-            blocked = redis_client.sismember(BLOCKED_IPS_KEY, client_ip)
-            if blocked:
-                # Check if individual block has expired
-                block_key = f"{BLOCKED_IPS_KEY}:block:{client_ip}"
-                expiry = redis_client.get(block_key)
-                if expiry and int(expiry) < int(time.time()):
-                    # Block expired, clean up
-                    redis_client.srem(BLOCKED_IPS_KEY, client_ip)
-                    redis_client.delete(block_key)
-                    return False
-                return True
+            # Check if this specific IP has an active block
+            block_key = f"{BLOCKED_IPS_KEY}:expiry:{client_ip}"
+            expiry = redis_client.get(block_key)
+            
+            if expiry:
+                # IP is blocked - check if expired
+                if int(expiry) > int(time.time()):
+                    return True
+                # Block expired - clean up
+                redis_client.srem(BLOCKED_IPS_KEY, client_ip)
+                redis_client.delete(block_key)
+                return False
+            
             return False
         except Exception:
             return False
-
     @staticmethod
     def block_ip(client_ip: str, duration: int = ADMIN_IP_BLOCK_DURATION) -> None:
         """Block an IP address from admin access"""
         if not client_ip:
             return
         try:
-            # Add to blocked set
+            # Add IP to blocked set
             redis_client.sadd(BLOCKED_IPS_KEY, client_ip)
-            # Set TTL on the set (only if it doesn't have one already)
-            if redis_client.ttl(BLOCKED_IPS_KEY) < 0:
-                redis_client.expire(BLOCKED_IPS_KEY, duration)
             
-            # Also store individual block expiry
-            block_key = f"{BLOCKED_IPS_KEY}:block:{client_ip}"
-            redis_client.set(block_key, int(time.time()) + duration)
-            redis_client.expire(block_key, duration)
+            # Set individual expiry for THIS IP ONLY
+            block_key = f"{BLOCKED_IPS_KEY}:expiry:{client_ip}"
+            redis_client.setex(block_key, duration, int(time.time()) + duration)
         except Exception:
             pass
 
@@ -71,7 +68,7 @@ class AdminSecurityManager:
             return
         try:
             redis_client.srem(BLOCKED_IPS_KEY, client_ip)
-            redis_client.delete(f"{BLOCKED_IPS_KEY}:block:{client_ip}")
+            redis_client.delete(f"{BLOCKED_IPS_KEY}:expiry:{client_ip}")
             redis_client.delete(f"{LOGIN_ATTEMPTS_KEY}:{client_ip}")
         except Exception:
             pass
@@ -149,22 +146,29 @@ class AdminSecurityManager:
         try:
             blocked_ips = AdminSecurityManager.get_blocked_ips()
             blocked_details = {}
+            current_time = int(time.time())
             
             for ip in blocked_ips:
                 attempts = AdminSecurityManager.get_login_attempts(ip)
                 
                 # Get individual block expiry
-                block_key = f"{BLOCKED_IPS_KEY}:block:{ip}"
+                block_key = f"{BLOCKED_IPS_KEY}:expiry:{ip}"
                 expiry = redis_client.get(block_key)
-                blocked_until = int(expiry) if expiry else None
                 
-                blocked_details[ip] = {
-                    "failed_attempts": attempts,
-                    "blocked_until": blocked_until
-                }
+                if expiry:
+                    expiry_time = int(expiry)
+                    if expiry_time > current_time:
+                        blocked_details[ip] = {
+                            "failed_attempts": attempts,
+                            "blocked_until": expiry_time
+                        }
+                    else:
+                        # Clean up expired
+                        redis_client.srem(BLOCKED_IPS_KEY, ip)
+                        redis_client.delete(block_key)
             
             return {
-                "blocked_ips_count": len(blocked_ips),
+                "blocked_ips_count": len(blocked_details),
                 "blocked_ips": blocked_details
             }
         except Exception:
