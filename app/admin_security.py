@@ -31,7 +31,17 @@ class AdminSecurityManager:
             return False
         try:
             blocked = redis_client.sismember(BLOCKED_IPS_KEY, client_ip)
-            return bool(blocked)
+            if blocked:
+                # Check if individual block has expired
+                block_key = f"{BLOCKED_IPS_KEY}:block:{client_ip}"
+                expiry = redis_client.get(block_key)
+                if expiry and int(expiry) < int(time.time()):
+                    # Block expired, clean up
+                    redis_client.srem(BLOCKED_IPS_KEY, client_ip)
+                    redis_client.delete(block_key)
+                    return False
+                return True
+            return False
         except Exception:
             return False
 
@@ -41,8 +51,16 @@ class AdminSecurityManager:
         if not client_ip:
             return
         try:
+            # Add to blocked set
             redis_client.sadd(BLOCKED_IPS_KEY, client_ip)
-            redis_client.expire(BLOCKED_IPS_KEY, duration)
+            # Set TTL on the set (only if it doesn't have one already)
+            if redis_client.ttl(BLOCKED_IPS_KEY) < 0:
+                redis_client.expire(BLOCKED_IPS_KEY, duration)
+            
+            # Also store individual block expiry
+            block_key = f"{BLOCKED_IPS_KEY}:block:{client_ip}"
+            redis_client.set(block_key, int(time.time()) + duration)
+            redis_client.expire(block_key, duration)
         except Exception:
             pass
 
@@ -53,6 +71,8 @@ class AdminSecurityManager:
             return
         try:
             redis_client.srem(BLOCKED_IPS_KEY, client_ip)
+            redis_client.delete(f"{BLOCKED_IPS_KEY}:block:{client_ip}")
+            redis_client.delete(f"{LOGIN_ATTEMPTS_KEY}:{client_ip}")
         except Exception:
             pass
 
@@ -125,16 +145,30 @@ class AdminSecurityManager:
 
     @staticmethod
     def get_admin_stats() -> dict:
-        """Get current admin security statistics"""
+        """Get current admin security statistics with details"""
         try:
-            blocked_count = redis_client.scard(BLOCKED_IPS_KEY) or 0
             blocked_ips = AdminSecurityManager.get_blocked_ips()
+            blocked_details = {}
+            
+            for ip in blocked_ips:
+                attempts = AdminSecurityManager.get_login_attempts(ip)
+                
+                # Get individual block expiry
+                block_key = f"{BLOCKED_IPS_KEY}:block:{ip}"
+                expiry = redis_client.get(block_key)
+                blocked_until = int(expiry) if expiry else None
+                
+                blocked_details[ip] = {
+                    "failed_attempts": attempts,
+                    "blocked_until": blocked_until
+                }
+            
             return {
-                "blocked_ips_count": blocked_count,
-                "blocked_ips": list(blocked_ips),
+                "blocked_ips_count": len(blocked_ips),
+                "blocked_ips": blocked_details
             }
         except Exception:
             return {
                 "blocked_ips_count": 0,
-                "blocked_ips": [],
+                "blocked_ips": {}
             }

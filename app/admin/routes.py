@@ -40,9 +40,49 @@ from app.tokens import create_access_token
 
 router = APIRouter()
 
+
+# ==================== HELPER ====================
+
+def _get_real_ip(request: Request) -> str:
+    """Get the real client IP, even behind Render's proxy"""
+    # Render and other proxies pass the real IP in X-Forwarded-For
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # Take the first IP (the original client)
+        return forwarded.split(",")[0].strip()
+    # Fallback to direct client host
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        if len(value) == 10:
+            return datetime.fromisoformat(value + "T00:00:00")
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {value}")
+
+
+def _ensure_wallet(db: Session, currency: str = "usd") -> Wallet:
+    wallet = db.execute(select(Wallet)).scalars().first()
+    if wallet:
+        return wallet
+    wallet = Wallet(balance=0, currency=currency)
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+
+# ==================== AUTH ====================
+
 @router.post("/login", response_model=AdminLoginResponse)
 def admin_login(payload: AdminLoginRequest, request: Request):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_real_ip(request)
     
     # Check if IP is blocked
     if AdminSecurityManager.is_ip_blocked(client_ip):
@@ -61,25 +101,8 @@ def admin_login(payload: AdminLoginRequest, request: Request):
     token = create_access_token({"admin": True})
     return AdminLoginResponse(access_token=token)
 
-def _parse_date(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        if len(value) == 10:
-            return datetime.fromisoformat(value + "T00:00:00")
-        return datetime.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {value}")
 
-def _ensure_wallet(db: Session, currency: str = "usd") -> Wallet:
-    wallet = db.execute(select(Wallet)).scalars().first()
-    if wallet:
-        return wallet
-    wallet = Wallet(balance=0, currency=currency)
-    db.add(wallet)
-    db.commit()
-    db.refresh(wallet)
-    return wallet
+# ==================== USERS ====================
 
 @router.get("/users", response_model=list[AdminUserListOut], dependencies=[Depends(require_admin)])
 def admin_list_users(
@@ -119,6 +142,7 @@ def admin_list_users(
     users = result.scalars().all()
     return users
 
+
 @router.get("/users/{user_id}/profile", response_model=AdminUserProfileOut, dependencies=[Depends(require_admin)])
 def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.id == user_id)).scalars().first()
@@ -137,6 +161,7 @@ def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
         PaymentTransactionOut.model_validate(t) for t in txns
     ]
     return profile
+
 
 @router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
 def admin_delete_user(user_id: int, payload: Optional[UserDeleteRequest] = None, db: Session = Depends(get_db)):
@@ -168,12 +193,16 @@ def admin_delete_user(user_id: int, payload: Optional[UserDeleteRequest] = None,
     db.commit()
     return {"message": "User deleted successfully", "email_sent": user.email is not None}
 
+
 @router.get("/users/{user_id}/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
 def admin_user_bug_reports(user_id: int, db: Session = Depends(get_db)):
     reports = db.execute(
         select(BugReport).where(BugReport.user_id == user_id).order_by(BugReport.created_at.desc())
     ).scalars().all()
     return reports
+
+
+# ==================== BUG REPORTS ====================
 
 @router.get("/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
 def admin_all_bug_reports(
@@ -185,6 +214,9 @@ def admin_all_bug_reports(
         select(BugReport).order_by(BugReport.created_at.desc()).limit(limit).offset(offset)
     ).scalars().all()
     return reports
+
+
+# ==================== PAYMENTS & WALLET ====================
 
 @router.get("/payments/summary", response_model=list[PaymentSummaryByCurrency], dependencies=[Depends(require_admin)])
 def admin_payments_summary(db: Session = Depends(get_db)):
@@ -208,10 +240,12 @@ def admin_payments_summary(db: Session = Depends(get_db)):
         )
     return summary
 
+
 @router.get("/wallet", response_model=WalletOut, dependencies=[Depends(require_admin)])
 def admin_wallet(db: Session = Depends(get_db)):
     wallet = _ensure_wallet(db)
     return wallet
+
 
 @router.post("/wallet/collate", response_model=WalletOut, dependencies=[Depends(require_admin)])
 def admin_wallet_collate(db: Session = Depends(get_db)):
@@ -229,6 +263,9 @@ def admin_wallet_collate(db: Session = Depends(get_db)):
     db.commit()
     db.refresh(wallet)
     return wallet
+
+
+# ==================== WITHDRAWALS ====================
 
 @router.post("/withdrawals", response_model=WithdrawalOut, dependencies=[Depends(require_admin)])
 def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_db)):
@@ -249,6 +286,7 @@ def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_db)):
     db.refresh(req)
     return req
 
+
 @router.get("/withdrawals", response_model=list[WithdrawalOut], dependencies=[Depends(require_admin)])
 def admin_withdrawals(
     pagination: dict = Depends(paginate),
@@ -259,6 +297,9 @@ def admin_withdrawals(
         select(WithdrawalRequest).order_by(WithdrawalRequest.created_at.desc()).limit(limit).offset(offset)
     ).scalars().all()
     return reqs
+
+
+# ==================== NOTIFICATIONS ====================
 
 @router.post("/notifications/send", response_model=NotificationOut, dependencies=[Depends(require_admin)])
 def admin_send_notification(payload: NotificationCreate, db: Session = Depends(get_db)):
@@ -276,14 +317,12 @@ def admin_send_notification(payload: NotificationCreate, db: Session = Depends(g
     return note
 
 
-# Broadcast notification to all users and send email
 @router.post("/notifications/broadcast", response_model=BroadcastNotificationResponse, dependencies=[Depends(require_admin)])
 def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Session = Depends(get_db)):
     users = db.execute(select(User)).scalars().all()
     recipients_count = 0
     failed_count = 0
     for user in users:
-        # Create notification in DB
         note = Notification(
             user_id=user.id,
             title=payload.title,
@@ -291,7 +330,6 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
         )
         db.add(note)
         recipients_count += 1
-        # Send email if enabled and user has email
         if payload.send_email and user.email:
             subject = payload.title
             body = broadcast_notification_email_html(payload.title, payload.message)
@@ -309,7 +347,7 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
     )
 
 
-# ==================== ADMIN SECURITY ENDPOINTS ====================
+# ==================== SECURITY ====================
 
 @router.get("/security/blocked-ips", dependencies=[Depends(require_admin)])
 def get_blocked_ips():
@@ -322,7 +360,7 @@ def get_blocked_ips():
 def block_admin_ip(ip_address: str):
     """Manually block an IP address from admin access"""
     AdminSecurityManager.block_ip(ip_address, duration=3600)
-    return {"message": f"IP {ip_address} has been blocked"}
+    return {"message": f"IP {ip_address} has been blocked for 1 hour"}
 
 
 @router.post("/security/unblock-ip/{ip_address}", dependencies=[Depends(require_admin)])
@@ -335,11 +373,10 @@ def unblock_admin_ip(ip_address: str):
 @router.post("/security/rate-limit-check", dependencies=[Depends(require_admin)])
 def check_rate_limit(request: Request):
     """Check current rate limit status"""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_real_ip(request)
     is_allowed, remaining = AdminSecurityManager.check_admin_rate_limit(client_ip)
     return {
         "ip": client_ip,
         "is_allowed": is_allowed,
         "remaining_requests": remaining
     }
-
