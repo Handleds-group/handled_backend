@@ -702,7 +702,7 @@ def account_deleted_with_reason_email_html(reason: Optional[str] = None, custom_
 
 def broadcast_notification_email_html(title: str, message: str) -> str:
     body = f"""
-    {_hero(title, "A new message from your Handled admin team", badge="Notification")}
+    {_hero(title, "From Handled team", badge="Notification")}
     <tr>
       <td class="px py" style="padding:36px 40px 32px;">
         {_panel(
@@ -718,10 +718,6 @@ def broadcast_notification_email_html(title: str, message: str) -> str:
             </table>
             '''
         )}
-
-        {_cta_button("Visit Handled", LANDING_PAGE_URL)}
-
-        {_message_bar("Stay in the loop", "You will receive updates directly in your Handled inbox and email.", tone="info")}
       </td>
     </tr>"""
     return _shell(title, body)
