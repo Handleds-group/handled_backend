@@ -27,11 +27,10 @@ app.add_middleware(
 # --------------------------
 # Middleware
 # --------------------------
-app.add_middleware(AdminRateLimitMiddleware, requests_per_minute=30)  # Admin rate limit
 app.add_middleware(TimeoutMiddleware, timeout=20)     # Custom timeout
 app.add_middleware(KillSwitchMiddleware)             # Kill switch for DB/Redis/Paystack
 app.add_middleware(IdempotencyMiddleware)            # Idempotency for POST/PUT
-app.add_middleware(RateLimitMiddleware, requests_per_minute=60)  # General rate limit
+app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
 
 # --------------------------
 # Routers

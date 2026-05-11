@@ -4,6 +4,7 @@ import os
 import requests
 from dotenv import load_dotenv
 import fastapi
+from typing import Optional
 
 load_dotenv()
 
@@ -547,7 +548,7 @@ def account_deleted_email_html() -> str:
     return _shell("Your Handled account has been permanently deleted", body)
 
 
-def account_deleted_with_reason_email_html(reason: str = None, custom_message: str = None) -> str:
+def account_deleted_with_reason_email_html(reason: Optional[str] = None, custom_message: Optional[str] = None) -> str:
     """
     Professional account deletion email with reason explanation
     
@@ -644,6 +645,11 @@ def account_deleted_with_reason_email_html(reason: str = None, custom_message: s
     for i, detail in enumerate(reason_info["details"], 1):
         details_html += _bullet_item(detail, "", str(i))
     
+    custom_message_html = (
+        f'<p style="margin:20px 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; color:{THEME["text_soft"]};">{custom_message}</p>'
+        if custom_message else ""
+    )
+    
     body = f"""
     {_hero(reason_info['title'], reason_info['description'], badge="Account Deleted")}
     <tr>
@@ -668,7 +674,7 @@ def account_deleted_with_reason_email_html(reason: str = None, custom_message: s
             <td>
               {_panel(
                   _section_label("What Was Removed")
-                  + '''
+                  + f'''
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                     {_bullet_item("Account access", "Your login credentials and all account access have been removed.", "1")}
                     {_bullet_item("Decision history", "All saved decisions and related history have been permanently deleted.", "2")}
@@ -683,7 +689,7 @@ def account_deleted_with_reason_email_html(reason: str = None, custom_message: s
 
         {_message_bar("Need Help?", f"If you believe this decision was made in error or have questions, contact our support team at {SUPPORT_EMAIL}.", tone="info")}
         
-        {f'<p style="margin:20px 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; color:{THEME[\"text_soft\"]};">{custom_message}</p>' if custom_message else ''}
+        {custom_message_html}
         
         <p class="body-text" style="margin:20px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; text-align:center; color:{THEME['text_soft']};">
           Thank you for being part of the Handled community.
@@ -692,6 +698,33 @@ def account_deleted_with_reason_email_html(reason: str = None, custom_message: s
     </tr>"""
 
     return _shell(f"{reason_info['title']} - Account Deletion", body)
+
+
+def broadcast_notification_email_html(title: str, message: str) -> str:
+    body = f"""
+    {_hero(title, "A new message from your Handled admin team", badge="Notification")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_panel(
+            _section_label("Message Summary")
+            + f'''
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td>
+                  <p style="margin:0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; color:{THEME['text']}; font-weight:700;">{title}</p>
+                  <p style="margin:10px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:24px; color:{THEME['text_soft']};">{message}</p>
+                </td>
+              </tr>
+            </table>
+            '''
+        )}
+
+        {_cta_button("Visit Handled", LANDING_PAGE_URL)}
+
+        {_message_bar("Stay in the loop", "You will receive updates directly in your Handled inbox and email.", tone="info")}
+      </td>
+    </tr>"""
+    return _shell(title, body)
 
 
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:

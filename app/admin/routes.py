@@ -34,7 +34,7 @@ from app.admin.schemas import (
     WithdrawalCreate,
     WithdrawalOut,
 )
-from app.email_utils import send_email, account_deleted_with_reason_email_html
+from app.email_utils import send_email, account_deleted_with_reason_email_html, broadcast_notification_email_html
 from app.admin_security import AdminSecurityManager
 from app.tokens import create_access_token
 
@@ -139,7 +139,7 @@ def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
     return profile
 
 @router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
-def admin_delete_user(user_id: int, payload: UserDeleteRequest = None, db: Session = Depends(get_db)):
+def admin_delete_user(user_id: int, payload: Optional[UserDeleteRequest] = None, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.id == user_id)).scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -294,7 +294,7 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
         # Send email if enabled and user has email
         if payload.send_email and user.email:
             subject = payload.title
-            body = payload.message
+            body = broadcast_notification_email_html(payload.title, payload.message)
             try:
                 if not send_email(subject, user.email, body):
                     failed_count += 1
