@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
@@ -28,20 +28,36 @@ from app.admin.schemas import (
     NotificationOut,
     BroadcastNotificationCreate,
     BroadcastNotificationResponse,
+    UserDeleteRequest,
     PaymentSummaryByCurrency,
     WalletOut,
     WithdrawalCreate,
     WithdrawalOut,
 )
-from app.email_utils import send_email
+from app.email_utils import send_email, account_deleted_with_reason_email_html
+from app.admin_security import AdminSecurityManager
 from app.tokens import create_access_token
 
 router = APIRouter()
 
 @router.post("/login", response_model=AdminLoginResponse)
-def admin_login(payload: AdminLoginRequest):
+def admin_login(payload: AdminLoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # Check if IP is blocked
+    if AdminSecurityManager.is_ip_blocked(client_ip):
+        raise HTTPException(status_code=403, detail="Your IP address has been temporarily blocked due to multiple failed login attempts")
+    
+    # Verify password
     if not verify_admin_password(payload.password):
-        raise HTTPException(status_code=401, detail="Invalid admin password")
+        attempts = AdminSecurityManager.record_failed_login(client_ip)
+        if attempts >= 5:
+            AdminSecurityManager.block_ip(client_ip, duration=900)
+            raise HTTPException(status_code=403, detail="Too many failed login attempts. Your IP has been blocked for 15 minutes")
+        raise HTTPException(status_code=401, detail=f"Invalid admin password (Attempt {attempts}/5)")
+    
+    # Reset attempts on successful login
+    AdminSecurityManager.reset_login_attempts(client_ip)
     token = create_access_token({"admin": True})
     return AdminLoginResponse(access_token=token)
 
@@ -123,11 +139,26 @@ def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
     return profile
 
 @router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
-def admin_delete_user(user_id: int, db: Session = Depends(get_db)):
+def admin_delete_user(user_id: int, payload: UserDeleteRequest = None, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.id == user_id)).scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Send deletion notification email before deletion
+    if user.email:
+        try:
+            reason = payload.reason if payload else None
+            custom_message = payload.custom_message if payload else None
+            email_html = account_deleted_with_reason_email_html(reason=reason, custom_message=custom_message)
+            send_email(
+                subject="Your Handled Account Has Been Deleted",
+                email_to=user.email,
+                body=email_html
+            )
+        except Exception as e:
+            print(f"Failed to send deletion email to {user.email}: {e}")
+
+    # Delete all associated data
     db.query(DecisionHistory).filter(DecisionHistory.user_id == str(user_id)).delete()
     db.query(BugReport).filter(BugReport.user_id == user_id).delete()
     db.query(PaymentTransaction).filter(PaymentTransaction.user_id == user_id).delete()
@@ -135,7 +166,7 @@ def admin_delete_user(user_id: int, db: Session = Depends(get_db)):
 
     db.delete(user)
     db.commit()
-    return {"message": "User deleted successfully"}
+    return {"message": "User deleted successfully", "email_sent": user.email is not None}
 
 @router.get("/users/{user_id}/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
 def admin_user_bug_reports(user_id: int, db: Session = Depends(get_db)):
@@ -276,3 +307,39 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
         recipients_count=recipients_count,
         failed_count=failed_count,
     )
+
+
+# ==================== ADMIN SECURITY ENDPOINTS ====================
+
+@router.get("/security/blocked-ips", dependencies=[Depends(require_admin)])
+def get_blocked_ips():
+    """Get list of currently blocked IPs"""
+    stats = AdminSecurityManager.get_admin_stats()
+    return stats
+
+
+@router.post("/security/block-ip/{ip_address}", dependencies=[Depends(require_admin)])
+def block_admin_ip(ip_address: str):
+    """Manually block an IP address from admin access"""
+    AdminSecurityManager.block_ip(ip_address, duration=3600)
+    return {"message": f"IP {ip_address} has been blocked"}
+
+
+@router.post("/security/unblock-ip/{ip_address}", dependencies=[Depends(require_admin)])
+def unblock_admin_ip(ip_address: str):
+    """Manually unblock an IP address"""
+    AdminSecurityManager.unblock_ip(ip_address)
+    return {"message": f"IP {ip_address} has been unblocked"}
+
+
+@router.post("/security/rate-limit-check", dependencies=[Depends(require_admin)])
+def check_rate_limit(request: Request):
+    """Check current rate limit status"""
+    client_ip = request.client.host if request.client else "unknown"
+    is_allowed, remaining = AdminSecurityManager.check_admin_rate_limit(client_ip)
+    return {
+        "ip": client_ip,
+        "is_allowed": is_allowed,
+        "remaining_requests": remaining
+    }
+

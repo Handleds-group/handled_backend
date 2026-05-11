@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import router as auth_router
 from app.users import router as users_router
 from app.health import router as health_router
-from app.middleware import KillSwitchMiddleware, IdempotencyMiddleware, TimeoutMiddleware, RateLimitMiddleware
+from app.middleware import KillSwitchMiddleware, IdempotencyMiddleware, TimeoutMiddleware, RateLimitMiddleware, AdminRateLimitMiddleware
 from app.database import init_db
 from app.decision_routes import router as decision_router
 from app.decision_service import generate_decision
@@ -27,10 +27,11 @@ app.add_middleware(
 # --------------------------
 # Middleware
 # --------------------------
+app.add_middleware(AdminRateLimitMiddleware, requests_per_minute=30)  # Admin rate limit
 app.add_middleware(TimeoutMiddleware, timeout=20)     # Custom timeout
 app.add_middleware(KillSwitchMiddleware)             # Kill switch for DB/Redis/Paystack
 app.add_middleware(IdempotencyMiddleware)            # Idempotency for POST/PUT
-app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=60)  # General rate limit
 
 # --------------------------
 # Routers

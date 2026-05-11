@@ -82,6 +82,46 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# Admin Rate Limiting Middleware
+class AdminRateLimitMiddleware(BaseHTTPMiddleware):
+    """Stricter rate limiting for admin endpoints (30 req/min vs 60 req/min)"""
+    def __init__(self, app, requests_per_minute: int = 30):
+        super().__init__(app)
+        self.requests_per_minute = requests_per_minute
+
+    async def dispatch(self, request, call_next):
+        # Only apply to admin endpoints
+        if not request.url.path.startswith("/admin"):
+            return await call_next(request)
+
+        # Skip docs
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
+
+        from app.admin_security import AdminSecurityManager
+
+        client_ip = request.client.host if request.client else "unknown"
+
+        # Check if IP is blocked
+        if AdminSecurityManager.is_ip_blocked(client_ip):
+            return JSONResponse(
+                {"detail": "Your IP address has been blocked due to suspicious activity. Please try again later."},
+                status_code=403
+            )
+
+        # Check rate limit
+        is_allowed, remaining = AdminSecurityManager.check_admin_rate_limit(client_ip, self.requests_per_minute)
+        if not is_allowed:
+            return JSONResponse(
+                {"detail": "Admin rate limit exceeded. Maximum 30 requests per minute."},
+                status_code=429
+            )
+
+        response = await call_next(request)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        return response
+
+
 class DecisionCacheMiddleware:
     TTL_SECONDS = 60 * 60 * 24
     KEY_PREFIX = "decision_cache"

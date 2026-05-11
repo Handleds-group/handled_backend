@@ -72,6 +72,10 @@ class BroadcastNotificationResponse(BaseModel):
     recipients_count: int
     failed_count: int
 
+class UserDeleteRequest(BaseModel):
+    reason: Optional[str] = None  # Reason for deletion
+    custom_message: Optional[str] = None  # Custom message to user
+
 class NotificationOut(BaseModel):
     id: int
     user_id: int

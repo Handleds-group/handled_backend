@@ -547,6 +547,153 @@ def account_deleted_email_html() -> str:
     return _shell("Your Handled account has been permanently deleted", body)
 
 
+def account_deleted_with_reason_email_html(reason: str = None, custom_message: str = None) -> str:
+    """
+    Professional account deletion email with reason explanation
+    
+    Reasons can be:
+    - "policy_violation" - Violated community guidelines
+    - "payment_fraud" - Fraudulent payment activity detected
+    - "fake_reports" - Submitted false bug reports
+    - "spam_abuse" - Spam or abusive behavior
+    - "inactive" - Account inactivity (>6 months)
+    - "security" - Security/compromise concerns
+    - "user_request" - User requested deletion
+    - "other" - Other reason
+    """
+    
+    reason_mapping = {
+        "policy_violation": {
+            "title": "Policy Violation",
+            "description": "Your account was deleted due to violation of our Community Guidelines and Terms of Service.",
+            "details": [
+                "Engagement in prohibited activities",
+                "Violation of our community standards",
+                "Unethical or harmful behavior detected",
+            ]
+        },
+        "payment_fraud": {
+            "title": "Fraudulent Payment Activity",
+            "description": "We detected fraudulent payment activity on your account.",
+            "details": [
+                "Suspicious payment patterns detected",
+                "Chargeback or payment dispute filed",
+                "Unauthorized access to billing information",
+            ]
+        },
+        "fake_reports": {
+            "title": "False Bug Reports",
+            "description": "Your account submitted multiple false or misleading bug reports.",
+            "details": [
+                "Multiple non-reproducible reports submitted",
+                "Spam bug reports detected",
+                "Misuse of the bug reporting system",
+            ]
+        },
+        "spam_abuse": {
+            "title": "Spam or Abusive Behavior",
+            "description": "Your account engaged in spam or abusive activities.",
+            "details": [
+                "Harassment or abusive communication",
+                "Spam notifications or messages",
+                "Disruptive behavior on the platform",
+            ]
+        },
+        "inactive": {
+            "title": "Account Inactivity",
+            "description": "Your account was deleted due to extended inactivity.",
+            "details": [
+                "No activity for more than 6 months",
+                "Account cleanup policy enforcement",
+                "Inactive premium subscriptions terminated",
+            ]
+        },
+        "security": {
+            "title": "Security Concerns",
+            "description": "Your account was deleted due to security concerns.",
+            "details": [
+                "Potential account compromise detected",
+                "Multiple failed authentication attempts",
+                "Suspicious login activity from unknown locations",
+            ]
+        },
+        "user_request": {
+            "title": "User Requested Deletion",
+            "description": "Your account deletion was completed as requested.",
+            "details": [
+                "Your deletion request was processed",
+                "All associated data has been removed",
+                "Account closure completed successfully",
+            ]
+        },
+        "other": {
+            "title": "Account Deleted",
+            "description": "Your Handled account has been deleted.",
+            "details": [
+                "Account and associated data removed",
+                "All subscriptions canceled",
+                "No further access available",
+            ]
+        }
+    }
+    
+    reason_info = reason_mapping.get(reason, reason_mapping["other"])
+    
+    # Build the details list
+    details_html = ""
+    for i, detail in enumerate(reason_info["details"], 1):
+        details_html += _bullet_item(detail, "", str(i))
+    
+    body = f"""
+    {_hero(reason_info['title'], reason_info['description'], badge="Account Deleted")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("Deletion Reason")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {details_html}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("What Was Removed")
+                  + '''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {_bullet_item("Account access", "Your login credentials and all account access have been removed.", "1")}
+                    {_bullet_item("Decision history", "All saved decisions and related history have been permanently deleted.", "2")}
+                    {_bullet_item("Profile data", "Your profile information and preferences have been removed.", "3")}
+                    {_bullet_item("Subscription billing", "Your subscription has been canceled. No further charges will be made.", "4")}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+        {_message_bar("Need Help?", f"If you believe this decision was made in error or have questions, contact our support team at {SUPPORT_EMAIL}.", tone="info")}
+        
+        {f'<p style="margin:20px 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; color:{THEME[\"text_soft\"]};">{custom_message}</p>' if custom_message else ''}
+        
+        <p class="body-text" style="margin:20px 0 0; font-family:Segoe UI, Arial, sans-serif; font-size:14px; line-height:22px; text-align:center; color:{THEME['text_soft']};">
+          Thank you for being part of the Handled community.
+        </p>
+      </td>
+    </tr>"""
+
+    return _shell(f"{reason_info['title']} - Account Deletion", body)
+
+
 def send_email_with_error(subject: str, email_to: str, body: str) -> tuple[bool, str | None]:
     if not RESEND_API_KEY:
         return False, "missing RESEND_API_KEY in environment"
