@@ -329,6 +329,8 @@ def get_remaining_requests(user: User | None):
     # PRO USERS
     if tier == PRO_TIER:
 
+        assert user is not None
+
         current = redis_client.get(
             _monthly_usage_key(user.id)
         )
@@ -341,6 +343,9 @@ def get_remaining_requests(user: User | None):
         )
 
     # PREMIUM USERS
+
+    assert user is not None
+
     current = redis_client.get(
         _monthly_usage_key(user.id)
     )
