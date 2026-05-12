@@ -28,12 +28,12 @@ PREMIUM_TIER = "premium"
 # =========================================================
 # MODELS
 # =========================================================
-# ONLY PREMIUM USES GPT-4o
+# ONLY PREMIUM USES GPT-5.4
 # This massively protects your billing.
 
-FREE_MODEL = "gpt-4o-mini"
-PRO_MODEL = "gpt-4o-mini"
-PREMIUM_MODEL = "gpt-4o"
+FREE_MODEL = "gpt-5.4-mini"
+PRO_MODEL = "gpt-5.4-mini"
+PREMIUM_MODEL = "gpt-5.4"
 
 
 # =========================================================
