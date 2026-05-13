@@ -47,6 +47,7 @@ class AdminUserProfileOut(BaseModel):
     username: Optional[str]
     email: Optional[EmailStr]
     description: Optional[str]
+    last_seen: Optional[datetime]
     created_at: Optional[datetime]
     last_seen: Optional[datetime]
     is_premium: Optional[bool]

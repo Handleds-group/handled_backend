@@ -56,8 +56,8 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
         cache_hit = True
     else:
         ai_result = await generate_decision(
-            user_input=user_input,
-            model=selected_model
+            user=user,
+            user_input=user_input
         )
         ai_response = ai_result["response"]
         actual_tokens_used = ai_result["tokens_used"]
@@ -78,6 +78,14 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
 
     db.add(decision)
     db.commit()
+
+    # Update last seen
+    try:
+        user.last_seen = datetime.utcnow()
+        db.add(user)
+        db.commit()
+    except Exception:
+        pass
 
     # Best-effort token usage tracking
     try:
