@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import UserLogin, TokenSchema, OTPRequest, SignupRequest, RefreshTokenRequest
 from app.tokens import create_access_token, create_refresh_token, decode_refresh_token
-from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html
+from app.email_utils import send_email, otp_email_html, welcome_email_html, login_alert_email_html, logout_alert_email_html
 from app.dependencies import get_current_user
 from passlib.hash import pbkdf2_sha256
 from jose import ExpiredSignatureError, JWTError
@@ -207,8 +207,26 @@ def refresh_token(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout():
+def logout(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     # Optional: add token to Redis blocklist if using stateless JWT
+    logout_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    client_ip = get_client_ip(request)
+    device = describe_device(request.headers.get("user-agent"))
+    background_tasks.add_task(
+        send_email,
+        subject="Logout confirmed",
+        email_to=current_user.email,
+        body=logout_alert_email_html(
+            logout_time_utc=logout_time,
+            device=device,
+            ip=client_ip,
+        )
+    )
+
     return {"message": "Logged out successfully"}
 
 # --------------------------

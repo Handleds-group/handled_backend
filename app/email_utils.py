@@ -380,6 +380,41 @@ def login_alert_email_html(login_time_utc: str, device: str = "Unknown device", 
     return _shell("A new login to your Handled account was recorded", body)
 
 
+def logout_alert_email_html(logout_time_utc: str, device: str = "Unknown device", ip: str = None) -> str:
+    session_rows = [
+        _info_row("Time (UTC)", logout_time_utc),
+        _info_row("Device", device, last=not ip),
+    ]
+    if ip:
+        session_rows.append(_info_row("IP Address", ip, last=True))
+
+    body = f"""
+    {_hero("Logout Confirmed", "Your Handled account was signed out successfully.", badge="Security")}
+    <tr>
+      <td class="px py" style="padding:36px 40px 32px;">
+        {_message_bar("Session ended", "If this was you, no action is needed. If you did not sign out, please change your password to keep your account secure.", tone="success")}
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr>
+            <td>
+              {_panel(
+                  _section_label("Logout Details")
+                  + f'''
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    {"".join(session_rows)}
+                  </table>
+                  '''
+              )}
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>"""
+
+    return _shell("Your Handled account was signed out", body)
+
+
 def payment_success_email_html(plan: str) -> str:
     plan_label = plan.capitalize()
     perks = {
