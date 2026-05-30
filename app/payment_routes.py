@@ -24,6 +24,17 @@ router = APIRouter()
 PUBLIC_BACKEND_URL = os.getenv("PUBLIC_BACKEND_URL")
 
 
+def _stripe_get(obj, key: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    try:
+        return obj[key]
+    except (KeyError, TypeError):
+        return getattr(obj, key, default)
+
+
 def _get_user_by_id(db: Session, user_id: str) -> Optional[User]:
     try:
         user_int = int(user_id)
@@ -93,9 +104,9 @@ def _has_active_subscription(user: User) -> bool:
         logger.exception("Failed to retrieve Stripe subscription for user_id=%s", user.id)
         return True
 
-    status = subscription.get("status")
-    cancel_at_period_end = bool(subscription.get("cancel_at_period_end"))
-    current_period_end = subscription.get("current_period_end")
+    status = _stripe_get(subscription, "status")
+    cancel_at_period_end = bool(_stripe_get(subscription, "cancel_at_period_end"))
+    current_period_end = _stripe_get(subscription, "current_period_end")
     now_ts = int(datetime.datetime.utcnow().timestamp())
 
     if status in {"active", "trialing", "past_due", "unpaid"}:
@@ -150,17 +161,17 @@ def _process_checkout_completion(
     db: Session,
     session_object: dict,
 ):
-    metadata = session_object.get("metadata", {})
-    user_id = metadata.get("user_id")
-    plan = metadata.get("plan")
-    subscription_id = session_object.get("subscription")
-    customer_details = session_object.get("customer_details") or {}
-    customer_email = session_object.get("customer_email") or customer_details.get("email")
-    amount = session_object.get("amount_total")
-    currency = session_object.get("currency")
-    reference = session_object.get("id")
-    status = session_object.get("payment_status") or "completed"
-    created_ts = session_object.get("created")
+    metadata = _stripe_get(session_object, "metadata", {}) or {}
+    user_id = _stripe_get(metadata, "user_id")
+    plan = _stripe_get(metadata, "plan")
+    subscription_id = _stripe_get(session_object, "subscription")
+    customer_details = _stripe_get(session_object, "customer_details", {}) or {}
+    customer_email = _stripe_get(session_object, "customer_email") or _stripe_get(customer_details, "email")
+    amount = _stripe_get(session_object, "amount_total")
+    currency = _stripe_get(session_object, "currency")
+    reference = _stripe_get(session_object, "id")
+    status = _stripe_get(session_object, "payment_status") or "completed"
+    created_ts = _stripe_get(session_object, "created")
     purchased_at = None
     if created_ts:
         purchased_at = datetime.datetime.utcfromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -218,15 +229,16 @@ def process_checkout_session(session_id: str) -> PaymentSessionVerifyResponse:
         if not session_object:
             raise HTTPException(status_code=404, detail="Checkout session not found")
 
-        payment_status = session_object.get("payment_status")
-        plan = (session_object.get("metadata") or {}).get("plan")
-        subscription_id = session_object.get("subscription")
+        payment_status = _stripe_get(session_object, "payment_status")
+        metadata = _stripe_get(session_object, "metadata", {}) or {}
+        plan = _stripe_get(metadata, "plan")
+        subscription_id = _stripe_get(session_object, "subscription")
 
         if payment_status not in {"paid", "no_payment_required"}:
             return PaymentSessionVerifyResponse(
                 status="pending",
                 payment_status=payment_status,
-                reference=session_object.get("id"),
+                reference=_stripe_get(session_object, "id"),
                 plan=plan,
                 subscription_id=subscription_id,
             )
@@ -235,7 +247,7 @@ def process_checkout_session(session_id: str) -> PaymentSessionVerifyResponse:
         return PaymentSessionVerifyResponse(
             status="completed",
             payment_status=payment_status,
-            reference=session_object.get("id"),
+            reference=_stripe_get(session_object, "id"),
             plan=plan,
             subscription_id=subscription_id,
         )
@@ -403,16 +415,16 @@ async def stripe_webhook(request: Request):
             _process_checkout_completion(db=db, session_object=data_object)
 
         elif event_type == "invoice.payment_succeeded":
-            subscription_id = data_object.get("subscription")
-            billing_reason = data_object.get("billing_reason")
+            subscription_id = _stripe_get(data_object, "subscription")
+            billing_reason = _stripe_get(data_object, "billing_reason")
             plan = None
             user_id = None
-            customer_email = data_object.get("customer_email")
+            customer_email = _stripe_get(data_object, "customer_email")
             if subscription_id:
                 subscription = stripe.Subscription.retrieve(subscription_id)
-                metadata = subscription.get("metadata", {})
-                plan = metadata.get("plan")
-                user_id = metadata.get("user_id")
+                metadata = _stripe_get(subscription, "metadata", {}) or {}
+                plan = _stripe_get(metadata, "plan")
+                user_id = _stripe_get(metadata, "user_id")
             logger.info(
                 "Processing invoice.payment_succeeded for user_id=%s plan=%s subscription_id=%s billing_reason=%s",
                 user_id,
@@ -420,23 +432,23 @@ async def stripe_webhook(request: Request):
                 subscription_id,
                 billing_reason,
             )
-            amount = data_object.get("amount_paid")
-            currency = data_object.get("currency")
-            reference = data_object.get("id")
-            status = data_object.get("status") or "succeeded"
+            amount = _stripe_get(data_object, "amount_paid")
+            currency = _stripe_get(data_object, "currency")
+            reference = _stripe_get(data_object, "id")
+            status = _stripe_get(data_object, "status") or "succeeded"
             payment_method = None
             purchased_at = None
-            created_ts = data_object.get("created")
+            created_ts = _stripe_get(data_object, "created")
             if created_ts:
                 purchased_at = datetime.datetime.utcfromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
-            charge_id = data_object.get("charge")
+            charge_id = _stripe_get(data_object, "charge")
             if charge_id:
                 try:
                     charge = stripe.Charge.retrieve(charge_id)
-                    payment_method_details = charge.get("payment_method_details") or {}
-                    card_details = payment_method_details.get("card") or {}
-                    brand = card_details.get("brand")
-                    last4 = card_details.get("last4")
+                    payment_method_details = _stripe_get(charge, "payment_method_details", {}) or {}
+                    card_details = _stripe_get(payment_method_details, "card", {}) or {}
+                    brand = _stripe_get(card_details, "brand")
+                    last4 = _stripe_get(card_details, "last4")
                     if brand and last4:
                         payment_method = f"{brand.title()} ending in {last4}"
                     elif brand:
@@ -470,12 +482,12 @@ async def stripe_webhook(request: Request):
             )
 
         elif event_type == "invoice.payment_failed":
-            logger.warning("Invoice payment failed: %s", data_object.get("id"))
+            logger.warning("Invoice payment failed: %s", _stripe_get(data_object, "id"))
 
         elif event_type == "customer.subscription.deleted":
-            subscription_id = data_object.get("id")
-            metadata = data_object.get("metadata", {})
-            user_id = metadata.get("user_id")
+            subscription_id = _stripe_get(data_object, "id")
+            metadata = _stripe_get(data_object, "metadata", {}) or {}
+            user_id = _stripe_get(metadata, "user_id")
             logger.info(
                 "Processing customer.subscription.deleted for user_id=%s subscription_id=%s",
                 user_id,
