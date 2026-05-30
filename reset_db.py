@@ -1,6 +1,6 @@
 import argparse
 
-from app.database import engine, init_db
+from app.database import auth_engine, init_db, supabase_engine
 from app.models import Base
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
@@ -8,10 +8,11 @@ from sqlalchemy.exc import OperationalError
 
 def reset_database(clear_redis: bool = False) -> None:
     try:
-        Base.metadata.drop_all(bind=engine)
+        Base.metadata.drop_all(bind=auth_engine)
+        Base.metadata.drop_all(bind=supabase_engine)
         init_db()
     except OperationalError as exc:
-        url = make_url(str(engine.url))
+        url = make_url(str(auth_engine.url))
         host = url.host or "unknown-host"
         port = url.port or "unknown-port"
         database = url.database or "unknown-database"
@@ -21,7 +22,7 @@ def reset_database(clear_redis: bool = False) -> None:
         print("Check that:")
         print("1. your internet connection is working")
         print("2. the hosted database is up")
-        print("3. DATABASE_URL in .env is correct")
+        print("3. NEON_DB and SUPABASE_DB in .env are correct")
         print("4. your DB provider allows connections from your current network/IP")
         print("5. no firewall or VPN is blocking the connection")
         print("")

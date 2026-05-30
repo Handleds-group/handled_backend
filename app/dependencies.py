@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.database import get_auth_db
 from jose import ExpiredSignatureError, JWTError
 from dotenv import load_dotenv
 import os
@@ -18,7 +18,7 @@ if not ACCESS_SECRET:
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_auth_db),
 ):
     from app.models import User
 

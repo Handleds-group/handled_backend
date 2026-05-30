@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_auth_db, get_supabase_db
 from app.pagination import paginate
 from app.models import (
     User,
@@ -113,7 +113,7 @@ def admin_list_users(
     last_seen_from: Optional[str] = None,
     last_seen_to: Optional[str] = None,
     pagination: dict = Depends(paginate),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_auth_db),
 ):
     limit, offset = pagination["limit"], pagination["offset"]
     query = select(User)
@@ -144,7 +144,7 @@ def admin_list_users(
 
 
 @router.get("/users/{user_id}/profile", response_model=AdminUserProfileOut, dependencies=[Depends(require_admin)])
-def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
+def admin_user_profile(user_id: int, db: Session = Depends(get_auth_db)):
     user = db.execute(select(User).where(User.id == user_id)).scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -164,8 +164,13 @@ def admin_user_profile(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
-def admin_delete_user(user_id: int, payload: Optional[UserDeleteRequest] = None, db: Session = Depends(get_db)):
-    user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+def admin_delete_user(
+    user_id: int,
+    payload: Optional[UserDeleteRequest] = None,
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
+    user = auth_db.execute(select(User).where(User.id == user_id)).scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -184,18 +189,19 @@ def admin_delete_user(user_id: int, payload: Optional[UserDeleteRequest] = None,
             print(f"Failed to send deletion email to {user.email}: {e}")
 
     # Delete all associated data
-    db.query(DecisionHistory).filter(DecisionHistory.user_id == str(user_id)).delete()
-    db.query(BugReport).filter(BugReport.user_id == user_id).delete()
-    db.query(PaymentTransaction).filter(PaymentTransaction.user_id == user_id).delete()
-    db.query(Notification).filter(Notification.user_id == user_id).delete()
+    supabase_db.query(DecisionHistory).filter(DecisionHistory.user_id == str(user_id)).delete()
+    supabase_db.query(BugReport).filter(BugReport.user_id == user_id).delete()
+    supabase_db.query(Notification).filter(Notification.user_id == user_id).delete()
+    supabase_db.commit()
 
-    db.delete(user)
-    db.commit()
+    auth_db.query(PaymentTransaction).filter(PaymentTransaction.user_id == user_id).delete()
+    auth_db.delete(user)
+    auth_db.commit()
     return {"message": "User deleted successfully", "email_sent": user.email is not None}
 
 
 @router.get("/users/{user_id}/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
-def admin_user_bug_reports(user_id: int, db: Session = Depends(get_db)):
+def admin_user_bug_reports(user_id: int, db: Session = Depends(get_supabase_db)):
     reports = db.execute(
         select(BugReport).where(BugReport.user_id == user_id).order_by(BugReport.created_at.desc())
     ).scalars().all()
@@ -207,7 +213,7 @@ def admin_user_bug_reports(user_id: int, db: Session = Depends(get_db)):
 @router.get("/bug-reports", response_model=list[BugReportAdminOut], dependencies=[Depends(require_admin)])
 def admin_all_bug_reports(
     pagination: dict = Depends(paginate),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_db),
 ):
     limit, offset = pagination["limit"], pagination["offset"]
     reports = db.execute(
@@ -219,7 +225,7 @@ def admin_all_bug_reports(
 # ==================== PAYMENTS & WALLET ====================
 
 @router.get("/payments/summary", response_model=list[PaymentSummaryByCurrency], dependencies=[Depends(require_admin)])
-def admin_payments_summary(db: Session = Depends(get_db)):
+def admin_payments_summary(db: Session = Depends(get_auth_db)):
     rows = db.execute(
         select(
             PaymentTransaction.currency,
@@ -242,13 +248,13 @@ def admin_payments_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/wallet", response_model=WalletOut, dependencies=[Depends(require_admin)])
-def admin_wallet(db: Session = Depends(get_db)):
+def admin_wallet(db: Session = Depends(get_auth_db)):
     wallet = _ensure_wallet(db)
     return wallet
 
 
 @router.post("/wallet/collate", response_model=WalletOut, dependencies=[Depends(require_admin)])
-def admin_wallet_collate(db: Session = Depends(get_db)):
+def admin_wallet_collate(db: Session = Depends(get_auth_db)):
     wallet = _ensure_wallet(db)
     total_in = db.execute(
         select(func.coalesce(func.sum(PaymentTransaction.amount), 0))
@@ -268,7 +274,7 @@ def admin_wallet_collate(db: Session = Depends(get_db)):
 # ==================== WITHDRAWALS ====================
 
 @router.post("/withdrawals", response_model=WithdrawalOut, dependencies=[Depends(require_admin)])
-def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_db)):
+def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_auth_db)):
     wallet = _ensure_wallet(db, currency=(payload.currency or "usd"))
     currency = payload.currency or wallet.currency
     if wallet.balance < payload.amount:
@@ -290,7 +296,7 @@ def admin_withdraw(payload: WithdrawalCreate, db: Session = Depends(get_db)):
 @router.get("/withdrawals", response_model=list[WithdrawalOut], dependencies=[Depends(require_admin)])
 def admin_withdrawals(
     pagination: dict = Depends(paginate),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_auth_db),
 ):
     limit, offset = pagination["limit"], pagination["offset"]
     reqs = db.execute(
@@ -302,8 +308,12 @@ def admin_withdrawals(
 # ==================== NOTIFICATIONS ====================
 
 @router.post("/notifications/send", response_model=NotificationOut, dependencies=[Depends(require_admin)])
-def admin_send_notification(payload: NotificationCreate, db: Session = Depends(get_db)):
-    user = db.execute(select(User).where(User.id == payload.user_id)).scalars().first()
+def admin_send_notification(
+    payload: NotificationCreate,
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
+    user = auth_db.execute(select(User).where(User.id == payload.user_id)).scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     note = Notification(
@@ -311,15 +321,19 @@ def admin_send_notification(payload: NotificationCreate, db: Session = Depends(g
         title=payload.title,
         message=payload.message,
     )
-    db.add(note)
-    db.commit()
-    db.refresh(note)
+    supabase_db.add(note)
+    supabase_db.commit()
+    supabase_db.refresh(note)
     return note
 
 
 @router.post("/notifications/broadcast", response_model=BroadcastNotificationResponse, dependencies=[Depends(require_admin)])
-def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Session = Depends(get_db)):
-    users = db.execute(select(User)).scalars().all()
+def admin_broadcast_notification(
+    payload: BroadcastNotificationCreate,
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
+    users = auth_db.execute(select(User)).scalars().all()
     recipients_count = 0
     failed_count = 0
     for user in users:
@@ -328,7 +342,7 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
             title=payload.title,
             message=payload.message,
         )
-        db.add(note)
+        supabase_db.add(note)
         recipients_count += 1
         if payload.send_email and user.email:
             subject = payload.title
@@ -338,7 +352,7 @@ def admin_broadcast_notification(payload: BroadcastNotificationCreate, db: Sessi
                     failed_count += 1
             except Exception:
                 failed_count += 1
-    db.commit()
+    supabase_db.commit()
     return BroadcastNotificationResponse(
         success=True,
         message="Notification sent to all users.",

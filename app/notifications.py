@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_supabase_db
 from app.dependencies import get_current_user
 from app.models import Notification
 
@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/me")
 def my_notifications(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_db),
     current_user=Depends(get_current_user),
 ):
     notes = db.execute(
@@ -23,7 +23,7 @@ def my_notifications(
 @router.post("/me/{notification_id}/read")
 def mark_read(
     notification_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_db),
     current_user=Depends(get_current_user),
 ):
     note = db.execute(

@@ -1,12 +1,12 @@
 from fastapi import APIRouter
 from sqlalchemy import text
 import anyio
-from app.database import engine
+from app.database import auth_engine, supabase_engine
 from app.idempotency import redis_client
 
 router = APIRouter()
 
-def _check_db():
+def _check_db(engine):
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
 
@@ -14,11 +14,16 @@ def _check_redis():
     redis_client.ping()
 
 async def check_services():
-    # Check database
+    # Check databases
     try:
-        await anyio.to_thread.run_sync(_check_db)
+        await anyio.to_thread.run_sync(_check_db, auth_engine)
     except Exception as exc:
-        return False, f"database error: {exc}"
+        return False, f"auth database error: {exc}"
+
+    try:
+        await anyio.to_thread.run_sync(_check_db, supabase_engine)
+    except Exception as exc:
+        return False, f"supabase database error: {exc}"
 
     # Check Redis
     try:

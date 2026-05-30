@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 import stripe
 
-from app.database import SessionLocal
+from app.database import AuthSessionLocal
 from app.models import User, PaymentTransaction
 from app.schemas import PaymentCheckoutRequest, PaymentCheckoutResponse, PaymentSessionVerifyResponse
 from app.stripe_service import create_checkout_session
@@ -275,7 +275,7 @@ def _send_payment_success_email(
 
 @router.post("/create-checkout", response_model=PaymentCheckoutResponse)
 def create_checkout(payload: PaymentCheckoutRequest, request: Request):
-    db = SessionLocal()
+    db = AuthSessionLocal()
     try:
         user = _get_user_by_id(db, payload.user_id)
         if not user:
@@ -317,7 +317,7 @@ def verify_checkout_session(session_id: str):
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
 
-    db = SessionLocal()
+    db = AuthSessionLocal()
     try:
         session_object = stripe.checkout.Session.retrieve(session_id)
         if not session_object:
@@ -369,7 +369,7 @@ async def stripe_webhook(request: Request):
     data_object = event["data"]["object"]
     logger.info("Stripe event received: %s", event_type)
 
-    db = SessionLocal()
+    db = AuthSessionLocal()
     try:
         if event_type == "checkout.session.completed":
             _process_checkout_completion(db=db, session_object=data_object)

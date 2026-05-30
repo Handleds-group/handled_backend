@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
-from app.database import get_db
+from app.database import get_auth_db, get_supabase_db
 from app.models import BugReport, DecisionHistory, Notification, OTP, PaymentTransaction, User
 from app.schemas import DeleteAccountRequest, UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
 from app.dependencies import get_current_user
@@ -17,7 +17,7 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _delete_user_account(db: Session, user: User) -> str:
+def _delete_user_account(auth_db: Session, supabase_db: Session, user: User) -> str:
     email_to = user.email
     subscription_id = user.subscription_id
     user_id = user.id
@@ -31,19 +31,21 @@ def _delete_user_account(db: Session, user: User) -> str:
                 detail="Unable to cancel the active subscription right now. Please try again."
             ) from exc
 
-    db.execute(delete(Notification).where(Notification.user_id == user_id))
-    db.execute(update(BugReport).where(BugReport.user_id == user_id).values(user_id=None))
-    db.execute(update(PaymentTransaction).where(PaymentTransaction.user_id == user_id).values(user_id=None))
-    db.execute(delete(OTP).where(OTP.user_id == user_id))
-    db.execute(delete(DecisionHistory).where(DecisionHistory.user_id == str(user_id)))
-    db.delete(user)
-    db.commit()
+    supabase_db.execute(delete(Notification).where(Notification.user_id == user_id))
+    supabase_db.execute(update(BugReport).where(BugReport.user_id == user_id).values(user_id=None))
+    supabase_db.execute(delete(DecisionHistory).where(DecisionHistory.user_id == str(user_id)))
+    supabase_db.commit()
+
+    auth_db.execute(update(PaymentTransaction).where(PaymentTransaction.user_id == user_id).values(user_id=None))
+    auth_db.execute(delete(OTP).where(OTP.user_id == user_id))
+    auth_db.delete(user)
+    auth_db.commit()
 
     return email_to
 
 
 @router.get("/", response_model=list[UserOut])
-def get_all_users(pagination: dict = Depends(paginate), db: Session = Depends(get_db)):
+def get_all_users(pagination: dict = Depends(paginate), db: Session = Depends(get_auth_db)):
     limit, offset = pagination["limit"], pagination["offset"]
     result = db.execute(select(User).limit(limit).offset(offset))
     users = result.scalars().all()
@@ -51,7 +53,7 @@ def get_all_users(pagination: dict = Depends(paginate), db: Session = Depends(ge
 
 
 @router.get("/profile/{user_id}", response_model=UserProfileOut)
-def get_profile_by_id(user_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def get_profile_by_id(user_id: int, db: Session = Depends(get_auth_db), current_user=Depends(get_current_user)):
     result = db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
     if not user:
@@ -62,7 +64,7 @@ def get_profile_by_id(user_id: int, db: Session = Depends(get_db), current_user=
 @router.put("/me", response_model=UserProfileOut)
 def update_my_profile(
     payload: UserProfileUpdate,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_auth_db),
     current_user=Depends(get_current_user)
 ):
     if payload.email is not None:
@@ -88,7 +90,7 @@ def update_my_profile(
 @router.put("/me/password")
 def change_password(
     payload: ChangePassword,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_auth_db),
     current_user=Depends(get_current_user)
 ):
     if not pbkdf2_sha256.verify(payload.old_password, current_user.password_hash):
@@ -106,13 +108,14 @@ def change_password(
 def delete_user_account_with_authorization(
     payload: DeleteAccountRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
     current_user=Depends(get_current_user)
 ):
     if current_user.id != payload.user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    email_to = _delete_user_account(db, current_user)
+    email_to = _delete_user_account(auth_db, supabase_db, current_user)
     background_tasks.add_task(
         send_email,
         subject="Your Handled account was deleted",
@@ -123,7 +126,7 @@ def delete_user_account_with_authorization(
 
 
 @router.get("/{user_id}", response_model=UserOut)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(user_id: int, db: Session = Depends(get_auth_db)):
     result = db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
     if not user:
@@ -132,7 +135,7 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{user_id}", response_model=UserOut)
-def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_auth_db), current_user=Depends(get_current_user)):
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -150,13 +153,14 @@ def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db), c
 def delete_user_account_by_id(
     user_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
     current_user=Depends(get_current_user)
 ):
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    email_to = _delete_user_account(db, current_user)
+    email_to = _delete_user_account(auth_db, supabase_db, current_user)
     background_tasks.add_task(
         send_email,
         subject="Your Handled account was deleted",

@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .database import get_db
+from .database import get_auth_db, get_supabase_db
 from .decision_service import generate_decision
 from .middleware import DecisionCacheMiddleware
 from .models import DecisionHistory, User
@@ -17,7 +17,11 @@ router = APIRouter(tags=["Decisions"])
 
 
 @router.post("/make", response_model=DecisionResponse)
-async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
+async def make_decision(
+    payload: DecisionRequest,
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
     user_input = payload.user_input.strip()
     user = None
 
@@ -29,7 +33,7 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id")
 
-    user = db.query(User).filter(User.id == user_id_int).first()
+    user = auth_db.query(User).filter(User.id == user_id_int).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -76,14 +80,14 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
         created_at=datetime.utcnow()
     )
 
-    db.add(decision)
-    db.commit()
+    supabase_db.add(decision)
+    supabase_db.commit()
 
     # Update last seen
     try:
         user.last_seen = datetime.utcnow()
-        db.add(user)
-        db.commit()
+        auth_db.add(user)
+        auth_db.commit()
     except Exception:
         pass
 
@@ -91,8 +95,8 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
     try:
         if user and actual_tokens_used > 0:
             user.tokens_used = (user.tokens_used or 0) + actual_tokens_used
-            db.add(user)
-            db.commit()
+            auth_db.add(user)
+            auth_db.commit()
     except Exception:
         pass
 
@@ -120,7 +124,7 @@ async def make_decision(payload: DecisionRequest, db: Session = Depends(get_db))
 
 
 @router.get("/history/{user_id}")
-async def get_history(user_id: str, db: Session = Depends(get_db)):
+async def get_history(user_id: str, db: Session = Depends(get_supabase_db)):
     history = db.query(DecisionHistory) \
         .filter(DecisionHistory.user_id == user_id) \
         .order_by(DecisionHistory.created_at.desc()) \
@@ -133,7 +137,7 @@ async def get_history(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{decision_id}")
-async def delete_decision(decision_id: str, db: Session = Depends(get_db)):
+async def delete_decision(decision_id: str, db: Session = Depends(get_supabase_db)):
     decision = db.query(DecisionHistory) \
         .filter(DecisionHistory.id == decision_id) \
         .first()

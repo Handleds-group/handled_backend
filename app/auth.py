@@ -2,7 +2,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.database import get_auth_db
 from app.models import User
 from app.schemas import UserLogin, TokenSchema, OTPRequest, SignupRequest, RefreshTokenRequest
 from app.tokens import create_access_token, create_refresh_token, decode_refresh_token
@@ -107,7 +107,7 @@ def describe_location(ip_address: str) -> str:
 def signup(
     payload: SignupRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_auth_db)
 ):
     email = normalize_email(payload.email)
     if payload.password != payload.confirm_password:
@@ -155,7 +155,7 @@ def signup(
 # --------------------------
 
 @router.post("/login", response_model=TokenSchema)
-def login(user: UserLogin, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def login(user: UserLogin, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_auth_db)):
     email = normalize_email(user.email)
     result = db.execute(select(User).where(User.email == email))
     db_user = result.scalars().first()
@@ -184,7 +184,7 @@ def login(user: UserLogin, request: Request, background_tasks: BackgroundTasks, 
     }
 
 @router.post("/refresh", response_model=TokenSchema)
-def refresh_token(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+def refresh_token(payload: RefreshTokenRequest, db: Session = Depends(get_auth_db)):
     try:
         token_payload = decode_refresh_token(payload.refresh_token)
         user_id = token_payload.get("user_id")
@@ -255,7 +255,7 @@ def reset_password(
     otp_code: str = Form(...),
     new_password: str = Form(...),
     confirm_password: str = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_auth_db)
 ):
     if not otp_code or not new_password or not confirm_password:
         raise HTTPException(status_code=422, detail="otp_code, new_password and confirm_password are required")
