@@ -1,8 +1,14 @@
 import os
+import logging
+from typing import Optional
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+from app.payment_routes import process_checkout_session
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 EMAIL_THEME_COLOR = os.getenv("EMAIL_THEME_COLOR", "5B2AA8")
 LANDING_PAGE_URL = os.getenv("LANDING_PAGE_URL", "https://handleds.vercel.app")
@@ -131,7 +137,19 @@ CANCEL_HTML = f"""<!doctype html>
 
 
 @router.get("/success", response_class=HTMLResponse)
-async def payment_success_page():
+async def payment_success_page(session_id: Optional[str] = None):
+    if session_id:
+        try:
+            result = process_checkout_session(session_id)
+            logger.info(
+                "Success page processed checkout session=%s status=%s plan=%s subscription_id=%s",
+                session_id,
+                result.status,
+                result.plan,
+                result.subscription_id,
+            )
+        except Exception:
+            logger.exception("Success page failed to process checkout session=%s", session_id)
     return HTMLResponse(content=SUCCESS_HTML)
 
 

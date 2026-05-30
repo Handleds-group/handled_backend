@@ -118,9 +118,9 @@ def _record_transaction(
     currency: Optional[str],
     status: str,
     reference: Optional[str],
-):
+) -> bool:
     if amount is None:
-        return
+        return False
     user_id_int = None
     if user_id:
         try:
@@ -130,7 +130,7 @@ def _record_transaction(
     if reference:
         existing = db.execute(select(PaymentTransaction).where(PaymentTransaction.reference == reference)).scalars().first()
         if existing:
-            return
+            return False
     txn = PaymentTransaction(
         user_id=user_id_int,
         plan=plan,
@@ -142,6 +142,7 @@ def _record_transaction(
     )
     db.add(txn)
     db.commit()
+    return True
 
 
 def _process_checkout_completion(
@@ -175,7 +176,7 @@ def _process_checkout_completion(
     if user_id and plan:
         _set_subscription(db, user_id, plan, subscription_id, is_premium=True)
 
-    _record_transaction(
+    created_transaction = _record_transaction(
         db=db,
         user_id=user_id,
         plan=plan,
@@ -184,6 +185,10 @@ def _process_checkout_completion(
         status=status,
         reference=reference,
     )
+    if not created_transaction:
+        logger.info("Checkout session already processed: %s", reference)
+        return
+
     _send_payment_success_email(
         db=db,
         user_id=user_id,
@@ -201,6 +206,43 @@ def _process_checkout_completion(
         reference=reference,
         purchased_at=purchased_at,
     )
+
+
+def process_checkout_session(session_id: str) -> PaymentSessionVerifyResponse:
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    db = AuthSessionLocal()
+    try:
+        session_object = stripe.checkout.Session.retrieve(session_id)
+        if not session_object:
+            raise HTTPException(status_code=404, detail="Checkout session not found")
+
+        payment_status = session_object.get("payment_status")
+        plan = (session_object.get("metadata") or {}).get("plan")
+        subscription_id = session_object.get("subscription")
+
+        if payment_status not in {"paid", "no_payment_required"}:
+            return PaymentSessionVerifyResponse(
+                status="pending",
+                payment_status=payment_status,
+                reference=session_object.get("id"),
+                plan=plan,
+                subscription_id=subscription_id,
+            )
+
+        _process_checkout_completion(db=db, session_object=session_object)
+        return PaymentSessionVerifyResponse(
+            status="completed",
+            payment_status=payment_status,
+            reference=session_object.get("id"),
+            plan=plan,
+            subscription_id=subscription_id,
+        )
+    except stripe.error.StripeError as exc:
+        raise HTTPException(status_code=502, detail=f"Stripe verify failed: {exc.user_message or str(exc)}") from exc
+    finally:
+        db.close()
 
 
 def _send_payment_receipt(
@@ -314,35 +356,21 @@ def create_checkout(payload: PaymentCheckoutRequest, request: Request):
 
 @router.get("/verify-session", response_model=PaymentSessionVerifyResponse)
 def verify_checkout_session(session_id: str):
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id is required")
+    return process_checkout_session(session_id)
 
+
+@router.get("/status/{user_id}")
+def get_payment_status(user_id: str):
     db = AuthSessionLocal()
     try:
-        session_object = stripe.checkout.Session.retrieve(session_id)
-        if not session_object:
-            raise HTTPException(status_code=404, detail="Checkout session not found")
-
-        payment_status = session_object.get("payment_status")
-        if payment_status not in {"paid", "no_payment_required"}:
-            return PaymentSessionVerifyResponse(
-                status="pending",
-                payment_status=payment_status,
-                reference=session_object.get("id"),
-                plan=(session_object.get("metadata") or {}).get("plan"),
-                subscription_id=session_object.get("subscription"),
-            )
-
-        _process_checkout_completion(db=db, session_object=session_object)
-        return PaymentSessionVerifyResponse(
-            status="completed",
-            payment_status=payment_status,
-            reference=session_object.get("id"),
-            plan=(session_object.get("metadata") or {}).get("plan"),
-            subscription_id=session_object.get("subscription"),
-        )
-    except stripe.error.StripeError as exc:
-        raise HTTPException(status_code=502, detail=f"Stripe verify failed: {exc.user_message or str(exc)}") from exc
+        user = _get_user_by_id(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "is_premium": bool(user.is_premium),
+            "plan": user.plan,
+            "subscription_id": user.subscription_id,
+        }
     finally:
         db.close()
 
