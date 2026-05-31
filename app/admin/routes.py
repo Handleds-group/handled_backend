@@ -30,6 +30,8 @@ from app.admin.schemas import (
     BroadcastNotificationResponse,
     UserDeleteRequest,
     PaymentSummaryByCurrency,
+    AiDecisionsSummaryOut,
+    AiTokensSummaryOut,
     WalletOut,
     WithdrawalCreate,
     WithdrawalOut,
@@ -39,6 +41,7 @@ from app.admin_security import AdminSecurityManager
 from app.tokens import create_access_token
 
 router = APIRouter()
+SUCCESSFUL_PAYMENT_STATUSES = ("completed", "succeeded", "paid", "no_payment_required")
 
 
 # ==================== HELPER ====================
@@ -72,6 +75,27 @@ def _ensure_wallet(db: Session, currency: str = "usd") -> Wallet:
     if wallet:
         return wallet
     wallet = Wallet(balance=0, currency=currency)
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+
+def _calculate_wallet_balance(db: Session) -> int:
+    total_in = db.execute(
+        select(func.coalesce(func.sum(PaymentTransaction.amount), 0))
+        .where(PaymentTransaction.status.in_(SUCCESSFUL_PAYMENT_STATUSES))
+    ).scalar_one()
+    total_out = db.execute(
+        select(func.coalesce(func.sum(WithdrawalRequest.amount), 0))
+        .where(WithdrawalRequest.status.in_(["approved", "paid"]))
+    ).scalar_one()
+    return int(total_in) - int(total_out)
+
+
+def _collate_wallet(db: Session, currency: str = "usd") -> Wallet:
+    wallet = _ensure_wallet(db, currency=currency)
+    wallet.balance = _calculate_wallet_balance(db)
     db.add(wallet)
     db.commit()
     db.refresh(wallet)
@@ -222,6 +246,42 @@ def admin_all_bug_reports(
     return reports
 
 
+# ==================== AI USAGE ====================
+
+@router.get("/ai/decisions/summary", response_model=AiDecisionsSummaryOut, dependencies=[Depends(require_admin)])
+def admin_ai_decisions_summary(db: Session = Depends(get_supabase_db)):
+    total_decisions = db.execute(
+        select(func.count(DecisionHistory.id))
+    ).scalar_one()
+    total_users_with_decisions = db.execute(
+        select(func.count(func.distinct(DecisionHistory.user_id)))
+    ).scalar_one()
+    return AiDecisionsSummaryOut(
+        total_decisions=int(total_decisions or 0),
+        total_users_with_decisions=int(total_users_with_decisions or 0),
+    )
+
+
+@router.get("/ai/tokens/summary", response_model=AiTokensSummaryOut, dependencies=[Depends(require_admin)])
+def admin_ai_tokens_summary(
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
+    total_tokens_from_decisions = supabase_db.execute(
+        select(func.coalesce(func.sum(DecisionHistory.tokens_used), 0))
+    ).scalar_one()
+    total_tokens_from_users = auth_db.execute(
+        select(func.coalesce(func.sum(User.tokens_used), 0))
+    ).scalar_one()
+    decision_total = int(total_tokens_from_decisions or 0)
+    user_total = int(total_tokens_from_users or 0)
+    return AiTokensSummaryOut(
+        total_tokens_used=max(decision_total, user_total),
+        total_tokens_from_decisions=decision_total,
+        total_tokens_from_users=user_total,
+    )
+
+
 # ==================== PAYMENTS & WALLET ====================
 
 @router.get("/payments/summary", response_model=list[PaymentSummaryByCurrency], dependencies=[Depends(require_admin)])
@@ -232,7 +292,7 @@ def admin_payments_summary(db: Session = Depends(get_auth_db)):
             func.coalesce(func.sum(PaymentTransaction.amount), 0),
             func.count(PaymentTransaction.id),
         )
-        .where(PaymentTransaction.status.in_(["completed", "succeeded"]))
+        .where(PaymentTransaction.status.in_(SUCCESSFUL_PAYMENT_STATUSES))
         .group_by(PaymentTransaction.currency)
     ).all()
     summary = []
@@ -249,26 +309,12 @@ def admin_payments_summary(db: Session = Depends(get_auth_db)):
 
 @router.get("/wallet", response_model=WalletOut, dependencies=[Depends(require_admin)])
 def admin_wallet(db: Session = Depends(get_auth_db)):
-    wallet = _ensure_wallet(db)
-    return wallet
+    return _collate_wallet(db)
 
 
 @router.post("/wallet/collate", response_model=WalletOut, dependencies=[Depends(require_admin)])
 def admin_wallet_collate(db: Session = Depends(get_auth_db)):
-    wallet = _ensure_wallet(db)
-    total_in = db.execute(
-        select(func.coalesce(func.sum(PaymentTransaction.amount), 0))
-        .where(PaymentTransaction.status.in_(["completed", "succeeded"]))
-    ).scalar_one()
-    total_out = db.execute(
-        select(func.coalesce(func.sum(WithdrawalRequest.amount), 0))
-        .where(WithdrawalRequest.status.in_(["approved", "paid"]))
-    ).scalar_one()
-    wallet.balance = int(total_in) - int(total_out)
-    db.add(wallet)
-    db.commit()
-    db.refresh(wallet)
-    return wallet
+    return _collate_wallet(db)
 
 
 # ==================== WITHDRAWALS ====================

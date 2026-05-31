@@ -44,6 +44,7 @@ class DecisionHistory(Base):
 
     input_text = Column(Text)
     ai_response = Column(Text)
+    tokens_used = Column(Integer, default=0)
 
     created_at = Column(DateTime)    
 

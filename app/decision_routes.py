@@ -77,6 +77,7 @@ async def make_decision(
         user_id=payload.user_id,
         input_text=user_input,
         ai_response=ai_response,
+        tokens_used=actual_tokens_used,
         created_at=datetime.utcnow()
     )
 

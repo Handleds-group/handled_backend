@@ -93,6 +93,15 @@ class PaymentSummaryByCurrency(BaseModel):
     total_amount: int
     total_count: int
 
+class AiDecisionsSummaryOut(BaseModel):
+    total_decisions: int
+    total_users_with_decisions: int
+
+class AiTokensSummaryOut(BaseModel):
+    total_tokens_used: int
+    total_tokens_from_decisions: int
+    total_tokens_from_users: int
+
 class WalletOut(BaseModel):
     id: int
     balance: int
