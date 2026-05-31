@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import hashlib
 import json
 import time
+import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from app.health import check_services
 from app.idempotency import redis_client
 
@@ -24,15 +26,141 @@ class KillSwitchMiddleware(BaseHTTPMiddleware):
 # Idempotency Middleware
 # --------------------------
 class IdempotencyMiddleware(BaseHTTPMiddleware):
+    IDEMPOTENT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+    KEY_PREFIX = "idempotency"
+    LOCK_TTL_SECONDS = 60
+    RESPONSE_TTL_SECONDS = 60 * 60 * 24
+    REPLAY_HEADERS = {"content-type"}
+    EXCLUDED_PATHS = {
+        "/payments/webhook",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+
+    async def _read_body(self, request):
+        body = await request.body()
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive
+        return body
+
+    def _request_fingerprint(self, request, body: bytes) -> str:
+        payload = {
+            "method": request.method,
+            "path": request.url.path,
+            "query": str(request.url.query),
+            "body_sha256": hashlib.sha256(body).hexdigest(),
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _cache_key(self, raw_key: str) -> str:
+        hashed_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+        return f"{self.KEY_PREFIX}:response:{hashed_key}"
+
+    def _lock_key(self, raw_key: str) -> str:
+        hashed_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+        return f"{self.KEY_PREFIX}:lock:{hashed_key}"
+
+    def _response_from_cache(self, cached_value: str):
+        try:
+            cached = json.loads(cached_value)
+            body = base64.b64decode(cached["body"])
+            headers = cached.get("headers") or {}
+            response = Response(
+                content=body,
+                status_code=int(cached["status_code"]),
+                media_type=None,
+                headers=headers,
+            )
+            response.headers["Idempotency-Status"] = "replayed"
+            return response
+        except Exception:
+            return None
+
+    async def _response_to_cache_payload(self, response, fingerprint: str):
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() in self.REPLAY_HEADERS
+        }
+        payload = {
+            "fingerprint": fingerprint,
+            "status_code": response.status_code,
+            "headers": headers,
+            "body": base64.b64encode(body).decode("ascii"),
+        }
+        replay_response = Response(
+            content=body,
+            status_code=response.status_code,
+            media_type=None,
+            headers=dict(response.headers),
+        )
+        replay_response.headers["Idempotency-Status"] = "created"
+        return payload, replay_response
+
     async def dispatch(self, request, call_next):
-        if request.method in ["POST", "PUT"]:
-            key = request.headers.get("Idempotency-Key")
-            if key:
-                exists = redis_client.get(key)
-                if exists:
-                    return JSONResponse({"detail": "Duplicate request detected"}, status_code=409)
-                redis_client.set(key, "1", ex=300)  # Store key for 5 minutes
-        return await call_next(request)
+        if request.method not in self.IDEMPOTENT_METHODS:
+            return await call_next(request)
+        if request.url.path in self.EXCLUDED_PATHS:
+            return await call_next(request)
+
+        raw_key = request.headers.get("Idempotency-Key")
+        if not raw_key:
+            return await call_next(request)
+
+        body = await self._read_body(request)
+        fingerprint = self._request_fingerprint(request, body)
+        cache_key = self._cache_key(raw_key)
+        lock_key = self._lock_key(raw_key)
+
+        try:
+            cached_value = redis_client.get(cache_key)
+            if cached_value:
+                cached_response = self._response_from_cache(cached_value)
+                if cached_response:
+                    cached_payload = json.loads(cached_value)
+                    if cached_payload.get("fingerprint") != fingerprint:
+                        return JSONResponse(
+                            {"detail": "Idempotency-Key was already used for a different request"},
+                            status_code=409,
+                        )
+                    return cached_response
+
+            lock_token = str(uuid.uuid4())
+            lock_acquired = redis_client.set(lock_key, lock_token, ex=self.LOCK_TTL_SECONDS, nx=True)
+            if not lock_acquired:
+                return JSONResponse(
+                    {"detail": "Request with this Idempotency-Key is already processing"},
+                    status_code=409,
+                    headers={"Retry-After": "1"},
+                )
+        except Exception:
+            return await call_next(request)
+
+        try:
+            response = await call_next(request)
+            if 200 <= response.status_code < 400:
+                payload, replay_response = await self._response_to_cache_payload(response, fingerprint)
+                try:
+                    redis_client.set(cache_key, json.dumps(payload), ex=self.RESPONSE_TTL_SECONDS)
+                except Exception:
+                    pass
+                return replay_response
+            return response
+        finally:
+            try:
+                if redis_client.get(lock_key) == lock_token:
+                    redis_client.delete(lock_key)
+            except Exception:
+                pass
 
 # --------------------------
 # Timeout Middleware
