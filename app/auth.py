@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # app/auth.py
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form, Request
 from sqlalchemy import select

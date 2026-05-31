@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 import time
 from typing import Optional, Set
 from app.idempotency import redis_client
