@@ -1,9 +1,3 @@
-"""
-Admin Security Module
-- Rate limiting for admin endpoints
-- IP blocking for admin panel
-- Failed login attempt tracking
-"""
 
 import time
 from typing import Optional, Set
