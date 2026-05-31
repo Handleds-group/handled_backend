@@ -99,6 +99,46 @@ def describe_location(ip_address: str) -> str:
     except Exception:
         return "Unknown location"
 
+
+def queue_login_alert_email(
+    background_tasks: BackgroundTasks,
+    *,
+    email: str,
+    login_time_utc: str,
+    device: str,
+    ip: str,
+) -> None:
+    background_tasks.add_task(
+        send_email,
+        subject="New login detected",
+        email_to=email,
+        body=login_alert_email_html(
+            login_time_utc=login_time_utc,
+            device=device,
+            ip=ip,
+        )
+    )
+
+
+def queue_logout_alert_email(
+    background_tasks: BackgroundTasks,
+    *,
+    email: str,
+    logout_time_utc: str,
+    device: str,
+    ip: str,
+) -> None:
+    background_tasks.add_task(
+        send_email,
+        subject="Logout confirmed",
+        email_to=email,
+        body=logout_alert_email_html(
+            logout_time_utc=logout_time_utc,
+            device=device,
+            ip=ip,
+        )
+    )
+
 # --------------------------
 # Signup
 # --------------------------
@@ -166,15 +206,12 @@ def login(user: UserLogin, request: Request, background_tasks: BackgroundTasks, 
     login_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     client_ip = get_client_ip(request)
     device = describe_device(request.headers.get("user-agent"))
-    background_tasks.add_task(
-        send_email,
-        subject="New login detected",
-        email_to=email,
-        body=login_alert_email_html(
-            login_time_utc=login_time,
-            device=device,
-            ip=client_ip,
-        )
+    queue_login_alert_email(
+        background_tasks,
+        email=email,
+        login_time_utc=login_time,
+        device=device,
+        ip=client_ip,
     )
 
     return {
@@ -216,15 +253,12 @@ def logout(
     logout_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     client_ip = get_client_ip(request)
     device = describe_device(request.headers.get("user-agent"))
-    background_tasks.add_task(
-        send_email,
-        subject="Logout confirmed",
-        email_to=current_user.email,
-        body=logout_alert_email_html(
-            logout_time_utc=logout_time,
-            device=device,
-            ip=client_ip,
-        )
+    queue_logout_alert_email(
+        background_tasks,
+        email=current_user.email,
+        logout_time_utc=logout_time,
+        device=device,
+        ip=client_ip,
     )
 
     return {"message": "Logged out successfully"}
