@@ -35,7 +35,7 @@ THEME = {
     "badge_text": "#5B21B6",
 }
 
-EMAIL_LOGO_URL = "https://i.ibb.co/XZZ6WFYG/handed-app-ui.png"
+EMAIL_LOGO_URL = "https://handled-backend.onrender.com/images/handled-logo.png"
 
 def _brand_logo(size: int = 64) -> str:
     return (
@@ -48,6 +48,7 @@ def _brand_logo(size: int = 64) -> str:
 
 
 def _shell(preheader: str, body_html: str) -> str:
+    
     t = THEME
     return f"""<!DOCTYPE html>
 <html lang="en">
