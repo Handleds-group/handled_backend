@@ -39,11 +39,13 @@ EMAIL_LOGO_URL = "https://handled-backend.onrender.com/images/handled-logo.png"
 
 def _brand_logo(size: int = 64) -> str:
     return (
+        f'<!--[if mso]><v:roundrect arcsize="16%" style="width:{size}px;height:{size}px;"><v:rect style="width:{size}px;height:{size}px;background-color:#7C3AED;" /><![endif]-->'
         f'<img src="{EMAIL_LOGO_URL}" '
         f'alt="Handled" '
         f'width="{size}" '
         f'height="{size}" '
-        f'style="display:block; width:{size}px; height:{size}px; border-radius:16px;" />'
+        f'style="display:block; width:{size}px; height:{size}px; border-radius:16px; font-family:Arial,sans-serif; font-size:24px; color:#7C3AED; text-align:center; line-height:{size}px;" '
+        f'/>'
     )
 
 
