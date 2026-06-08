@@ -255,22 +255,36 @@ class DecisionCacheMiddleware:
     KEY_PREFIX = "decision_cache"
 
     @classmethod
-    def build_cache_key(cls, user_input: str, model: str, profile_context: str = "") -> str:
+    def build_cache_key(
+        cls,
+        user_input: str,
+        model: str,
+        profile_context: str = "",
+        reply_context: str = "",
+    ) -> str:
         normalized_payload = {
             "user_input": (user_input or "").strip(),
             "model": model,
             "profile_context": (profile_context or "").strip(),
+            "reply_context": (reply_context or "").strip(),
         }
         serialized = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         return f"{cls.KEY_PREFIX}:{digest}"
 
     @classmethod
-    def get_cached_response(cls, user_input: str, model: str, profile_context: str = ""):
+    def get_cached_response(
+        cls,
+        user_input: str,
+        model: str,
+        profile_context: str = "",
+        reply_context: str = "",
+    ):
         cache_key = cls.build_cache_key(
             user_input=user_input,
             model=model,
             profile_context=profile_context,
+            reply_context=reply_context,
         )
         cached_value = redis_client.get(cache_key)
         if not cached_value:
@@ -289,11 +303,13 @@ class DecisionCacheMiddleware:
         model: str,
         response_text: str,
         profile_context: str = "",
+        reply_context: str = "",
     ):
         cache_key = cls.build_cache_key(
             user_input=user_input,
             model=model,
             profile_context=profile_context,
+            reply_context=reply_context,
         )
         payload = {
             "response": response_text

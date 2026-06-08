@@ -100,13 +100,16 @@ Rules:
 - Do not explain your reasoning unless safety requires it.
 - Do not ask follow-up questions unless the request is impossible to decide.
 - Be direct, calm, and simple.
+- Be friendly and natural when the user says thanks, gives a compliment, or makes a warm social comment.
+- If the user is replying to a tagged decision or message, answer that reply in the context of the tagged item.
+- If the user is only thanking you or complimenting you, acknowledge it briefly instead of forcing a new decision.
 - Keep the answer to one short sentence when possible.
 - Use the user's profile context when it matters.
 - Tailor the decision to the user's description, occupation/profession, and allergies.
 - Never recommend anything that conflicts with the user's allergies.
 - If the request involves danger, health risk, self-harm, or an emergency, choose the safest immediate action.
 
-Output only the one decision the user should take now.
+Output only the one decision the user should take now, unless the user is only being social or thankful.
 """
 
 
@@ -204,6 +207,40 @@ def limit_input_by_user(user: User | None, text: str) -> str:
         return cleaned[:PRO_INPUT_LIMIT]
 
     return cleaned[:FREE_INPUT_LIMIT]
+
+
+def build_reply_context(
+    reply_to_user_input: str | None = None,
+    reply_to_ai_response: str | None = None,
+    reply_to_text: str | None = None,
+    reply_to_role: str | None = None,
+) -> str:
+
+    role = (reply_to_role or "").strip().lower()
+    user_input = (reply_to_user_input or "").strip()
+    ai_response = (reply_to_ai_response or "").strip()
+    text = (reply_to_text or "").strip()
+
+    lines = []
+
+    if user_input:
+        lines.append(f"Tagged user decision input: {user_input[:500]}")
+
+    if ai_response:
+        lines.append(f"Tagged Handled decision output: {ai_response[:500]}")
+
+    if text and not lines:
+        label = "Tagged message"
+
+        if role in {"user", "input"}:
+            label = "Tagged user decision input"
+
+        elif role in {"assistant", "handled", "ai", "output"}:
+            label = "Tagged Handled decision output"
+
+        lines.append(f"{label}: {text[:500]}")
+
+    return "\n".join(lines)
 
 
 # =========================================================
@@ -431,7 +468,8 @@ def record_usage(user: User | None):
 
 async def generate_decision(
     user: User | None,
-    user_input: str
+    user_input: str,
+    reply_context: str = "",
 ):
 
     try:
@@ -470,6 +508,16 @@ async def generate_decision(
         decision_request = (
             "User profile context:\n"
             f"{profile_context}\n\n"
+        )
+
+        if reply_context.strip():
+            decision_request += (
+                "The user swiped/replied to this tagged decision message:\n"
+                f"{reply_context.strip()}\n\n"
+                "Treat the user's new message as a direct reply to the tagged item.\n\n"
+            )
+
+        decision_request += (
             "User needs a decision for this situation:\n"
             f"{cleaned_input}"
         )

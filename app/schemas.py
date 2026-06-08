@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
 
@@ -145,6 +145,51 @@ class DecisionRequest(BaseModel):
     user_id: str
     user_input: str = Field(..., min_length=1)
     tokens_used: int = 0
+    reply_to_decision_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "reply_to_decision_id",
+            "replyToDecisionId",
+            "replied_to_decision_id",
+            "parent_decision_id",
+        ),
+    )
+    reply_to_user_input: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "reply_to_user_input",
+            "replyToUserInput",
+            "reply_to_input",
+            "quotedUserInput",
+        ),
+    )
+    reply_to_ai_response: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "reply_to_ai_response",
+            "replyToAiResponse",
+            "replyToResponse",
+            "reply_to_response",
+            "quotedAiResponse",
+        ),
+    )
+    reply_to_text: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "reply_to_text",
+            "replyToText",
+            "reply_to_message",
+            "quotedText",
+        ),
+    )
+    reply_to_role: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "reply_to_role",
+            "replyToRole",
+            "quotedRole",
+        ),
+    )
 
 
 class DecisionResponseData(BaseModel):

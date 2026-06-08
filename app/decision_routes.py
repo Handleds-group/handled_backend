@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .database import get_auth_db, get_supabase_db
-from .decision_service import build_user_profile_context, generate_decision
+from .decision_service import build_reply_context, build_user_profile_context, generate_decision
 from .middleware import DecisionCacheMiddleware
 from .models import DecisionHistory, User
 from .schemas import DecisionRequest, DecisionResponse
@@ -50,10 +50,32 @@ async def make_decision(
 
     selected_model = get_model_for_user(user)
     profile_context = build_user_profile_context(user)
+
+    reply_to_user_input = payload.reply_to_user_input
+    reply_to_ai_response = payload.reply_to_ai_response
+
+    if payload.reply_to_decision_id:
+        replied_decision = supabase_db.query(DecisionHistory) \
+            .filter(DecisionHistory.id == payload.reply_to_decision_id) \
+            .filter(DecisionHistory.user_id == payload.user_id) \
+            .first()
+
+        if replied_decision:
+            reply_to_user_input = reply_to_user_input or replied_decision.input_text
+            reply_to_ai_response = reply_to_ai_response or replied_decision.ai_response
+
+    reply_context = build_reply_context(
+        reply_to_user_input=reply_to_user_input,
+        reply_to_ai_response=reply_to_ai_response,
+        reply_to_text=payload.reply_to_text,
+        reply_to_role=payload.reply_to_role,
+    )
+
     cached_result = DecisionCacheMiddleware.get_cached_response(
         user_input=user_input,
         model=selected_model,
         profile_context=profile_context,
+        reply_context=reply_context,
     )
 
     if cached_result:
@@ -63,7 +85,8 @@ async def make_decision(
     else:
         ai_result = await generate_decision(
             user=user,
-            user_input=user_input
+            user_input=user_input,
+            reply_context=reply_context,
         )
         ai_response = ai_result["response"]
         actual_tokens_used = ai_result["tokens_used"]
@@ -72,6 +95,7 @@ async def make_decision(
             model=selected_model,
             response_text=ai_response,
             profile_context=profile_context,
+            reply_context=reply_context,
         )
         cache_hit = False
 
