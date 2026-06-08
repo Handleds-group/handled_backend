@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.idempotency import redis_client
 from app.models import User
+from app.openrouter import FREE_MODEL, PREMIUM_MODEL, PRO_MODEL
 
 FREE_TIER = "free"
 PRO_TIER = "pro"
@@ -13,11 +14,6 @@ PREMIUM_TIER = "premium"
 FREE_DAILY_DECISION_LIMIT = 10
 PRO_MONTHLY_TOKEN_LIMIT = int(os.getenv("PRO_MONTHLY_TOKEN_LIMIT", "100000"))
 PREMIUM_MONTHLY_TOKEN_LIMIT = int(os.getenv("PREMIUM_MONTHLY_TOKEN_LIMIT", "500000"))
-
-FREE_MODEL = "gpt-5.4-mini"
-PRO_MODEL = "gpt-5.4-mini"
-PREMIUM_MODEL = "gpt-5.4"
-
 
 def get_user_tier(user: User | None) -> str:
     if not user:

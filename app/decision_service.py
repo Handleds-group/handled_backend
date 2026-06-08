@@ -1,21 +1,22 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
-
-from openai import OpenAI
 
 from app.idempotency import redis_client
 from app.models import User
-
-
-# =========================================================
-# OPENAI CLIENT
-# =========================================================
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
+from app.openrouter import (
+    FREE_MODEL,
+    PREMIUM_MODEL,
+    PRO_MODEL,
+    client,
 )
+
+
+# =========================================================
+# AI CLIENT
+# =========================================================
+# Temporarily routed through OpenRouter. Keep this provider isolated so we can
+# switch back to direct OpenAI by replacing app.openrouter later.
 
 
 # =========================================================
@@ -30,12 +31,8 @@ PREMIUM_TIER = "premium"
 # =========================================================
 # MODELS
 # =========================================================
-# ONLY PREMIUM USES GPT-5.4
-# This massively protects your billing.
-
-FREE_MODEL = "gpt-5.4-mini"
-PRO_MODEL = "gpt-5.4-mini"
-PREMIUM_MODEL = "gpt-5.4"
+# Free and Pro use Claude via OpenRouter.
+# Premium uses DeepSeek via OpenRouter.
 
 
 # =========================================================
