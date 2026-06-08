@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .database import get_auth_db, get_supabase_db
-from .decision_service import generate_decision
+from .decision_service import build_user_profile_context, generate_decision
 from .middleware import DecisionCacheMiddleware
 from .models import DecisionHistory, User
 from .schemas import DecisionRequest, DecisionResponse
@@ -49,9 +49,11 @@ async def make_decision(
         )
 
     selected_model = get_model_for_user(user)
+    profile_context = build_user_profile_context(user)
     cached_result = DecisionCacheMiddleware.get_cached_response(
         user_input=user_input,
-        model=selected_model
+        model=selected_model,
+        profile_context=profile_context,
     )
 
     if cached_result:
@@ -68,7 +70,8 @@ async def make_decision(
         DecisionCacheMiddleware.set_cached_response(
             user_input=user_input,
             model=selected_model,
-            response_text=ai_response
+            response_text=ai_response,
+            profile_context=profile_context,
         )
         cache_hit = False
 

@@ -85,33 +85,52 @@ PREMIUM_MAX_TOKENS = 120
 # SHORT PROMPT = LOWER COST
 
 SYSTEM_PROMPT = """
-You are Handled AI.
-loui
-Your job is to make ONE clear decision for overwhelmed users.
+Your name is Handled.
+
+You are the decision engine for a decision-making app.
+You help overwhelmed users, ADHD brains, anxious users, and users who struggle
+to know what to do at the right time.
+
+Your job is to choose ONE best action for the user right now.
 
 Rules:
-- Never give multiple options
-- Never say "it depends"
-- Never overexplain
-- Be calm and confident
-- Reduce overthinking
-- Give one direct action
-- Keep responses extremely short
-- Speak simply for ADHD and anxious users
-- No essays
-- No long motivation
+- Give only one clear decision.
+- Do not give options.
+- Do not write headings like Decision, Reason, or Next.
+- Do not explain your reasoning unless safety requires it.
+- Do not ask follow-up questions unless the request is impossible to decide.
+- Be direct, calm, and simple.
+- Keep the answer to one short sentence when possible.
+- Use the user's profile context when it matters.
+- Tailor the decision to the user's description, occupation/profession, and allergies.
+- Never recommend anything that conflicts with the user's allergies.
+- If the request involves danger, health risk, self-harm, or an emergency, choose the safest immediate action.
 
-Format:
-
-Decision:
-<one direct decision>
-
-Reason:
-<one short reason>
-
-Next:
-<one immediate action>
+Output only the one decision the user should take now.
 """
+
+
+def build_user_profile_context(user: User | None) -> str:
+
+    if not user:
+        return "No user profile context is available."
+
+    profile = {
+        "description": (user.description or "").strip(),
+        "occupation_or_profession": (user.occupation or "").strip(),
+        "allergies": (user.allergic or "").strip(),
+    }
+
+    lines = [
+        f"{key}: {value}"
+        for key, value in profile.items()
+        if value
+    ]
+
+    if not lines:
+        return "No user profile context is available."
+
+    return "\n".join(lines)
 
 
 # =========================================================
@@ -446,6 +465,15 @@ async def generate_decision(
             user_input
         )
 
+        profile_context = build_user_profile_context(user)
+
+        decision_request = (
+            "User profile context:\n"
+            f"{profile_context}\n\n"
+            "User needs a decision for this situation:\n"
+            f"{cleaned_input}"
+        )
+
         # MODEL
         model = get_model_for_user(user)
 
@@ -464,7 +492,7 @@ async def generate_decision(
                 },
                 {
                     "role": "user",
-                    "content": cleaned_input
+                    "content": decision_request
                 }
             ],
 
