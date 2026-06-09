@@ -2,18 +2,65 @@
 
 from datetime import datetime
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .database import get_auth_db, get_supabase_db
 from .decision_service import build_reply_context, build_user_profile_context, generate_decision
 from .middleware import DecisionCacheMiddleware
-from .models import DecisionHistory, User
+from .models import DecisionHistory, DecisionUsageEvent, User
 from .schemas import DecisionRequest, DecisionResponse
 from .subscription_service import can_make_decision, can_use_monthly_tokens, get_model_for_user, get_remaining_decisions, get_remaining_monthly_tokens, get_user_tier, record_decision_usage, record_monthly_token_usage
 
 router = APIRouter(tags=["Decisions"])
+
+MONTH_LABELS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+]
+
+
+def _backfill_decision_usage_events(user_id: str, db: Session) -> None:
+    existing_decision_ids = {
+        row[0]
+        for row in db.query(DecisionUsageEvent.decision_id)
+        .filter(DecisionUsageEvent.user_id == user_id)
+        .all()
+    }
+
+    history = db.query(DecisionHistory) \
+        .filter(DecisionHistory.user_id == user_id) \
+        .all()
+
+    created_any = False
+
+    for decision in history:
+        if decision.id in existing_decision_ids:
+            continue
+
+        db.add(
+            DecisionUsageEvent(
+                user_id=user_id,
+                decision_id=decision.id,
+                created_at=decision.created_at or datetime.utcnow(),
+            )
+        )
+        created_any = True
+
+    if created_any:
+        db.commit()
 
 
 @router.post("/make", response_model=DecisionResponse)
@@ -99,16 +146,25 @@ async def make_decision(
         )
         cache_hit = False
 
+    decision_id = str(uuid.uuid4())
+    created_at = datetime.utcnow()
+
     decision = DecisionHistory(
-        id=str(uuid.uuid4()),
+        id=decision_id,
         user_id=payload.user_id,
         input_text=user_input,
         ai_response=ai_response,
         tokens_used=actual_tokens_used,
-        created_at=datetime.utcnow()
+        created_at=created_at
+    )
+    usage_event = DecisionUsageEvent(
+        user_id=payload.user_id,
+        decision_id=decision_id,
+        created_at=created_at,
     )
 
     supabase_db.add(decision)
+    supabase_db.add(usage_event)
     supabase_db.commit()
 
     # Update last seen
@@ -161,6 +217,72 @@ async def get_history(user_id: str, db: Session = Depends(get_supabase_db)):
     return {
         "count": len(history),
         "data": history
+    }
+
+
+@router.get("/stats/{user_id}")
+async def get_decision_stats(
+    user_id: str,
+    year: Optional[int] = Query(default=None, ge=1970, le=9999),
+    auth_db: Session = Depends(get_auth_db),
+    supabase_db: Session = Depends(get_supabase_db),
+):
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    user = auth_db.query(User).filter(User.id == user_id_int).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    selected_year = year or datetime.utcnow().year
+
+    _backfill_decision_usage_events(user_id, supabase_db)
+
+    account_created_at = user.created_at
+    year_start = datetime(selected_year, 1, 1)
+    year_end = datetime(selected_year + 1, 1, 1)
+
+    year_events = supabase_db.query(DecisionUsageEvent.created_at) \
+        .filter(DecisionUsageEvent.user_id == user_id) \
+        .filter(DecisionUsageEvent.created_at >= year_start) \
+        .filter(DecisionUsageEvent.created_at < year_end) \
+        .all()
+
+    all_events = supabase_db.query(DecisionUsageEvent.created_at) \
+        .filter(DecisionUsageEvent.user_id == user_id) \
+        .all()
+
+    monthly_counts = {month: 0 for month in range(1, 13)}
+
+    for event in year_events:
+        created_at = event[0]
+        if created_at:
+            monthly_counts[created_at.month] += 1
+
+    monthly = [
+        {
+            "month": month,
+            "label": MONTH_LABELS[month - 1],
+            "count": monthly_counts[month],
+        }
+        for month in range(1, 13)
+    ]
+
+    total_since_account_created = sum(
+        1
+        for event in all_events
+        if event[0] and (not account_created_at or event[0] >= account_created_at.replace(tzinfo=None))
+    )
+
+    return {
+        "user_id": user_id,
+        "year": selected_year,
+        "account_created_at": account_created_at,
+        "total_since_account_created": total_since_account_created,
+        "total_for_year": sum(monthly_counts.values()),
+        "monthly": monthly,
     }
 
 

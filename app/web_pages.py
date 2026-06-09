@@ -18,7 +18,7 @@ SUCCESS_BORDER = "#E4D7FF"
 SUCCESS_MUTED = "#665487"
 SUCCESS_TEXT = "#40315F"
 SUCCESS_BADGE_BG = "#EFE3FF"
-LOGO_URL = "/images/handled-app-icon.png"
+LOGO_URL = "https://handled-backend.onrender.com/images/handled-logo.png"
 
 SUCCESS_HTML = f"""<!doctype html>
 <html lang=\"en\" data-theme=\"light\">

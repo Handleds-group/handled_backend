@@ -15,6 +15,7 @@ from app.models import (
     Wallet,
     WithdrawalRequest,
     DecisionHistory,
+    DecisionUsageEvent,
 )
 from app.admin.dependencies import require_admin, verify_admin_password
 from app.admin.schemas import (
@@ -214,6 +215,7 @@ def admin_delete_user(
 
     # Delete all associated data
     supabase_db.query(DecisionHistory).filter(DecisionHistory.user_id == str(user_id)).delete()
+    supabase_db.query(DecisionUsageEvent).filter(DecisionUsageEvent.user_id == str(user_id)).delete()
     supabase_db.query(BugReport).filter(BugReport.user_id == user_id).delete()
     supabase_db.query(Notification).filter(Notification.user_id == user_id).delete()
     supabase_db.commit()

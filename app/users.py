@@ -3,7 +3,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
 from app.database import get_auth_db, get_supabase_db
-from app.models import BugReport, DecisionHistory, Notification, OTP, PaymentTransaction, User
+from app.models import BugReport, DecisionHistory, DecisionUsageEvent, Notification, OTP, PaymentTransaction, User
 from app.schemas import DeleteAccountRequest, UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
 from app.dependencies import get_current_user
 from app.email_utils import send_email, account_deleted_email_html
@@ -34,6 +34,7 @@ def _delete_user_account(auth_db: Session, supabase_db: Session, user: User) -> 
     supabase_db.execute(delete(Notification).where(Notification.user_id == user_id))
     supabase_db.execute(update(BugReport).where(BugReport.user_id == user_id).values(user_id=None))
     supabase_db.execute(delete(DecisionHistory).where(DecisionHistory.user_id == str(user_id)))
+    supabase_db.execute(delete(DecisionUsageEvent).where(DecisionUsageEvent.user_id == str(user_id)))
     supabase_db.commit()
 
     auth_db.execute(update(PaymentTransaction).where(PaymentTransaction.user_id == user_id).values(user_id=None))

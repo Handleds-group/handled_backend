@@ -48,6 +48,14 @@ class DecisionHistory(Base):
 
     created_at = Column(DateTime)    
 
+class DecisionUsageEvent(Base):
+    __tablename__ = "decision_usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True, nullable=False)
+    decision_id = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, index=True, nullable=False)
+
 class BugReport(Base):
     __tablename__ = "bug_reports"
 

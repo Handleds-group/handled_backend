@@ -101,7 +101,7 @@ def get_supabase_db():
 
 def init_db():
     # Import here to avoid circular imports at module load time.
-    from app.models import BugReport, DecisionHistory, Notification, OTP, PaymentTransaction, User, Wallet, WithdrawalRequest
+    from app.models import BugReport, DecisionHistory, DecisionUsageEvent, Notification, OTP, PaymentTransaction, User, Wallet, WithdrawalRequest
 
     auth_tables = [
         User.__table__,
@@ -112,6 +112,7 @@ def init_db():
     ]
     supabase_tables = [
         DecisionHistory.__table__,
+        DecisionUsageEvent.__table__,
         BugReport.__table__,
         Notification.__table__,
     ]
