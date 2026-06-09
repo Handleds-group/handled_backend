@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import declarative_base
@@ -22,6 +22,7 @@ class User(Base):
     plan = Column(String, nullable=True)
     subscription_id = Column(String, nullable=True)
     tokens_used = Column(Integer, default=0)
+    use_profile_context = Column(Boolean, default=True)
     last_seen = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -45,6 +46,9 @@ class DecisionHistory(Base):
     input_text = Column(Text)
     ai_response = Column(Text)
     tokens_used = Column(Integer, default=0)
+    decision_number = Column(Integer, nullable=True)
+    parent_decision_id = Column(String, nullable=True, index=True)
+    inline_decisions = Column(JSON, default=list)
 
     created_at = Column(DateTime)    
 

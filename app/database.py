@@ -130,6 +130,7 @@ def _ensure_auth_columns():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS use_profile_context BOOLEAN DEFAULT TRUE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE",
     ]
     with auth_engine.begin() as conn:
@@ -140,6 +141,9 @@ def _ensure_auth_columns():
 def _ensure_supabase_columns():
     alter_statements = [
         "ALTER TABLE decision_history ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0",
+        "ALTER TABLE decision_history ADD COLUMN IF NOT EXISTS decision_number INTEGER",
+        "ALTER TABLE decision_history ADD COLUMN IF NOT EXISTS parent_decision_id VARCHAR",
+        "ALTER TABLE decision_history ADD COLUMN IF NOT EXISTS inline_decisions JSONB DEFAULT '[]'::jsonb",
         "ALTER TABLE bug_reports ADD COLUMN IF NOT EXISTS user_id INTEGER",
         "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id INTEGER",
         "ALTER TABLE bug_reports DROP CONSTRAINT IF EXISTS bug_reports_user_id_fkey",

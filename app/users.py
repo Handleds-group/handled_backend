@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
 from app.database import get_auth_db, get_supabase_db
 from app.models import BugReport, DecisionHistory, DecisionUsageEvent, Notification, OTP, PaymentTransaction, User
-from app.schemas import DeleteAccountRequest, UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword
+from app.schemas import DeleteAccountRequest, UserOut, UserUpdate, UserProfileOut, UserProfileUpdate, ChangePassword, UserProfileContextSettingRequest, UserProfileContextSettingResponse
 from app.dependencies import get_current_user
 from app.email_utils import send_email, account_deleted_email_html
 from app.pagination import paginate
@@ -81,11 +81,39 @@ def update_my_profile(
         current_user.allergic = payload.allergic
     if payload.description is not None:
         current_user.description = payload.description
+    if payload.use_profile_context is not None:
+        current_user.use_profile_context = payload.use_profile_context
 
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.get("/me/profile-context", response_model=UserProfileContextSettingResponse)
+def get_my_profile_context_setting(current_user=Depends(get_current_user)):
+    return {
+        "user_id": current_user.id,
+        "use_profile_context": current_user.use_profile_context is not False,
+        "message": "Profile context setting fetched successfully",
+    }
+
+
+@router.put("/me/profile-context", response_model=UserProfileContextSettingResponse)
+def update_my_profile_context_setting(
+    payload: UserProfileContextSettingRequest,
+    db: Session = Depends(get_auth_db),
+    current_user=Depends(get_current_user),
+):
+    current_user.use_profile_context = payload.use_profile_context
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "user_id": current_user.id,
+        "use_profile_context": current_user.use_profile_context is not False,
+        "message": "Profile context setting updated successfully",
+    }
 
 
 @router.put("/me/password")

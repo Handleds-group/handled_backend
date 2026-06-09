@@ -171,6 +171,7 @@ def signup(
         gender=payload.gender,
         description=payload.description,
         allergic=payload.allergic,
+        use_profile_context=payload.use_profile_context,
         password_hash=hashed_pw,
         is_verified=True
     )

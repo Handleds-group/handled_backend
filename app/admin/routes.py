@@ -253,7 +253,14 @@ def admin_all_bug_reports(
 @router.get("/ai/decisions/summary", response_model=AiDecisionsSummaryOut, dependencies=[Depends(require_admin)])
 def admin_ai_decisions_summary(db: Session = Depends(get_supabase_db)):
     total_decisions = db.execute(
-        select(func.count(DecisionHistory.id))
+        select(
+            func.coalesce(
+                func.sum(
+                    1 + func.coalesce(func.jsonb_array_length(DecisionHistory.inline_decisions), 0)
+                ),
+                0,
+            )
+        )
     ).scalar_one()
     total_users_with_decisions = db.execute(
         select(func.count(func.distinct(DecisionHistory.user_id)))

@@ -24,6 +24,7 @@ class SignupRequest(BaseModel):
     allergic: Optional[str]
     password: str
     confirm_password: str
+    use_profile_context: bool = True
 
 
 class UserLogin(BaseModel):
@@ -38,6 +39,7 @@ class UserUpdate(BaseModel):
     gender: Optional[str]
     description: Optional[str]
     allergic: Optional[str]
+    use_profile_context: Optional[bool] = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -45,6 +47,7 @@ class UserProfileUpdate(BaseModel):
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
+    use_profile_context: Optional[bool] = None
 
 
 class UserProfileOut(BaseModel):
@@ -52,6 +55,7 @@ class UserProfileOut(BaseModel):
     email: Optional[EmailStr]
     allergic: Optional[str]
     description: Optional[str]
+    use_profile_context: bool = True
     created_at: Optional[datetime]
 
     class Config:
@@ -67,6 +71,7 @@ class UserOut(BaseModel):
     gender: Optional[str]
     description: Optional[str]
     allergic: Optional[str]
+    use_profile_context: bool = True
     is_verified: bool
     is_premium: Optional[bool] = None
     created_at: Optional[datetime]
@@ -192,8 +197,41 @@ class DecisionRequest(BaseModel):
     )
 
 
+class DecisionInlineOut(BaseModel):
+    id: str
+    root_decision_id: Optional[str] = None
+    decision_number: Optional[int] = None
+    input_text: str
+    ai_response: str
+    tokens_used: int = 0
+    reply_to_decision_id: Optional[str] = None
+    reply_to_user_input: Optional[str] = None
+    reply_to_ai_response: Optional[str] = None
+    reply_to_text: Optional[str] = None
+    reply_to_role: Optional[str] = None
+    created_at: datetime
+
+
+class DecisionHistoryOut(BaseModel):
+    id: str
+    user_id: str
+    decision_number: Optional[int] = None
+    input_text: str
+    ai_response: str
+    tokens_used: int = 0
+    inline_decisions: list[DecisionInlineOut] = Field(default_factory=list)
+    created_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
 class DecisionResponseData(BaseModel):
     decision_id: str
+    root_decision_id: str
+    inline_decision_id: Optional[str] = None
+    decision_number: Optional[int] = None
+    is_inline: bool = False
     response: str
     cached: bool
     tier: str
@@ -204,3 +242,25 @@ class DecisionResponseData(BaseModel):
 class DecisionResponse(BaseModel):
     message: str
     data: DecisionResponseData
+
+
+class DeleteAllDecisionsRequest(BaseModel):
+    user_id: str
+    confirm: bool = True
+
+
+class DeleteAllDecisionsResponse(BaseModel):
+    message: str
+    user_id: str
+    deleted_decisions: int
+    deleted_usage_events: int
+
+
+class UserProfileContextSettingRequest(BaseModel):
+    use_profile_context: bool
+
+
+class UserProfileContextSettingResponse(BaseModel):
+    user_id: int
+    use_profile_context: bool
+    message: str
